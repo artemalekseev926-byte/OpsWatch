@@ -91,12 +91,12 @@ def normalize_url(value: str) -> str:
     value = (value or "").strip().rstrip("/")
     if not value:
         return ""
-    if "://" not in value:
-        value = "http://" + value
-    host_part = value.split("://", 1)[1]
-    if ":" not in host_part.split("/")[0]:
-        value = value + ":8765"
-    return value
+    if "://" in value:
+        return value
+    host = value.split("/", 1)[0]
+    if ":" not in host:
+        value = host + ":8765" + value[len(host):]
+    return "http://" + value
 
 
 def free_port() -> int:

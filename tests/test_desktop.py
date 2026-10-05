@@ -1,12 +1,15 @@
 import argparse
 
+import pytest
+
 from opswatch.desktop.launcher import normalize_url, selftest
 from opswatch.desktop.winservice import USAGE
 
 
 def test_normalize_url():
     assert normalize_url("192.168.1.10") == "http://192.168.1.10:8765"
-    assert normalize_url("https://ops.example.com/") == "https://ops.example.com:8765"
+    assert normalize_url("https://ops.example.com/") == "https://ops.example.com"
+    assert normalize_url("srv01") == "http://srv01:8765"
     assert normalize_url("http://srv:9000") == "http://srv:9000"
     assert normalize_url("") == ""
 
@@ -25,6 +28,7 @@ def test_selftest_runs_server(tmp_path):
 
 
 def test_icon_generation(tmp_path):
+    pytest.importorskip("PIL")
     from opswatch.desktop.icon import save_ico, save_png
 
     assert save_ico(tmp_path / "a.ico").stat().st_size > 1000
