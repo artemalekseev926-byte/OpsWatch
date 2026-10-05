@@ -46,6 +46,7 @@ class ProfileIn(BaseModel):
     quiet_start: str | None = None
     quiet_end: str | None = None
     language: str | None = None
+    chat_telegram: bool | None = None
 
 
 class PasswordIn(BaseModel):

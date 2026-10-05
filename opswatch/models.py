@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from opswatch.db import Base, utcnow
@@ -43,6 +43,7 @@ class User(Base):
     quiet_end: Mapped[str] = mapped_column(String(5), default="")
     note: Mapped[str] = mapped_column(Text, default="")
     language: Mapped[str] = mapped_column(String(8), default="ru", server_default="ru")
+    chat_telegram: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -228,3 +229,47 @@ class MetricPoint(Base):
     name: Mapped[str] = mapped_column(String(64))
     value: Mapped[float] = mapped_column(Float)
     ts: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ChatRoom(Base):
+    __tablename__ = "chat_rooms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(16), default="group")
+    title: Mapped[str] = mapped_column(String(200), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    direct_key: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    roles: Mapped[list] = mapped_column(JSON, default=list)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_message_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ChatMember(Base):
+    __tablename__ = "chat_members"
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_chat_members_room_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("chat_rooms.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    via_role: Mapped[str] = mapped_column(String(64), default="")
+    last_read_id: Mapped[int] = mapped_column(Integer, default=0)
+    muted: Mapped[bool] = mapped_column(Boolean, default=False)
+    joined_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    __table_args__ = (Index("ix_chat_messages_room", "room_id", "id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("chat_rooms.id", ondelete="CASCADE"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), default="text")
+    text: Mapped[str] = mapped_column(Text, default="")
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    event_id: Mapped[int | None] = mapped_column(ForeignKey("events.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)

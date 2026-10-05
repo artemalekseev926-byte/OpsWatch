@@ -31,6 +31,7 @@ DEFAULTS: dict[str, Any] = {
     "s3_prefix": "opswatch/",
     "s3_link_days": 7,
     "language": "ru",
+    "chat_enabled": True,
 }
 
 for _kind in ("event", "repeat", "escalation", "resolved"):
@@ -40,7 +41,7 @@ for _kind in ("event", "repeat", "escalation", "resolved"):
 SECRET_KEYS = {"telegram_token", "s3_secret_key"}
 
 INT_KEYS = {"group_window_min", "event_retention_days", "metric_retention_days", "telegram_part_mb", "s3_link_days"}
-BOOL_KEYS = {"registration_enabled", "bot_public_bugs"}
+BOOL_KEYS = {"registration_enabled", "bot_public_bugs", "chat_enabled"}
 
 
 def _coerce(key: str, value: Any) -> Any:

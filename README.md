@@ -1,7 +1,7 @@
 # OpsWatch
 
-[![Windows build](https://github.com/artemalekseev926-byte/win/actions/workflows/build-windows.yml/badge.svg)](https://github.com/artemalekseev926-byte/win/actions/workflows/build-windows.yml)
-[![Tests](https://github.com/artemalekseev926-byte/win/actions/workflows/tests.yml/badge.svg)](https://github.com/artemalekseev926-byte/win/actions/workflows/tests.yml)
+[![Windows build](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/build-windows.yml/badge.svg)](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/build-windows.yml)
+[![Tests](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/tests.yml/badge.svg)](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **Русский** · [English](README.en.md)
@@ -19,6 +19,7 @@
 - **Шаблоны уведомлений** — текст сообщений Telegram для нового события, повтора, эскалации и решения настраивается в панели с живым предпросмотром.
 - **Мониторинг ресурсов** — webhook Zabbix, Prometheus Alertmanager, опрос Zabbix API, HTTP(S)-проверки, универсальный webhook для любых систем. Проблемы закрываются автоматически при восстановлении.
 - **Резервное копирование** — `mysqldump`, `pg_dump`, `BACKUP DATABASE` для MS SQL, копирование файловой базы 1С (с проверкой, что база свободна, или через теневое копирование VSS). Расписание cron, сжатие и шифрование AES-256, проверка целостности архива, ротация, отправка в Telegram (большие файлы — частями, через локальный Bot API до 2 ГБ, через S3-ссылку или в сетевую папку).
+- **Чат между сотрудниками** — личная переписка и группы, участников можно добавить сразу по ролям (и группа будет сама следить за сменой ролей), упоминания `@логин`, обсуждение событий прямо в чате, мгновенная доставка, уведомления на ПК, а для тех, кто не в сети, — пересылка в Telegram с ответом прямо из бота.
 - **Баг-репорты** — из веб-панели (со скриншотами), через бота (`/bug текст` + фото) и по HTTP API от других систем.
 - **Маршрутизация** — правила «события типа X из источника Y с важностью ≥ Z → ролям/пользователям N», личные подписки, тихие часы, группировка повторов, эскалация неподтверждённых критичных событий.
 - **Telegram** — личные сообщения с кнопками «Принял», «Решено», «Подробнее»; подписки через бота; можно подключить собственного бота.
@@ -30,7 +31,7 @@
 
 ## Быстрый старт (Windows)
 
-1. Скачайте **`OpsWatch-<версия>-windows-x64.zip`** со страницы [Releases](https://github.com/artemalekseev926-byte/win/releases) (или из артефактов последней [сборки](https://github.com/artemalekseev926-byte/win/actions/workflows/build-windows.yml)).
+1. Скачайте **`OpsWatch-<версия>-windows-x64.zip`** со страницы [Releases](https://github.com/artemalekseev926-byte/OpsWatch/releases) (или из артефактов последней [сборки](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/build-windows.yml)).
 2. Распакуйте и запустите **`OpsWatch.exe`**.
 3. Выберите режим: **«Этот компьютер — сервер»** или **«Подключиться к серверу»** (на компьютерах сотрудников).
 4. Войдите как **`admin1` / `admin1`** и смените пароль в профиле.
@@ -45,7 +46,7 @@ OpsWatchServer.exe start
 ## Установка из исходников (Linux / Windows)
 
 ```bash
-pip install "git+https://github.com/artemalekseev926-byte/win.git"
+pip install "git+https://github.com/artemalekseev926-byte/OpsWatch.git"
 opswatch run
 ```
 
@@ -54,7 +55,7 @@ opswatch run
 ### Docker
 
 ```bash
-git clone https://github.com/artemalekseev926-byte/win.git opswatch && cd opswatch
+git clone https://github.com/artemalekseev926-byte/OpsWatch.git opswatch && cd opswatch
 docker compose up -d
 ```
 
@@ -197,6 +198,25 @@ curl -X POST "http://opswatch.local:8765/api/ingest/<TOKEN>" \
 
 Интерфейс, бот и уведомления — на русском и английском. Язык выбирается на экране входа, в меню пользователя или в профиле и сохраняется для уведомлений в Telegram. Язык текстов событий от источников и бэкапов задаётся в **Настройках → Язык системных событий**. При первом запуске язык берётся из системы; задать его явно можно переменной `OPSWATCH_LANGUAGE=ru` или `en`.
 
+### Чат
+
+Вкладка **«Чат»** — быстрая связь между сотрудниками без сторонних мессенджеров.
+
+- **Личные сообщения**: кнопка «Написать сотруднику» или поиск по имени, логину и роли. Видно, кто сейчас в сети, а в личной переписке — прочитано ли сообщение (✓✓).
+- **Группы**: «Новая группа» → название → роли (например, «Системный администратор» и «Администратор 1С») — все сотрудники с этими ролями сразу попадают в группу. С включённым «Следить за ролями» новые сотрудники с такими ролями добавятся сами, а при смене роли — исключатся. Отдельных людей можно отметить вручную.
+- **Управление**: администраторы группы переименовывают её, меняют роли, добавляют и исключают участников, назначают других администраторов; любой участник может выключить звук или покинуть группу.
+- **Упоминания**: `@логин` подсвечивается, подсказка появляется после `@`.
+- **События в чате**: в карточке события кнопка «Обсудить в чате» отправляет его в выбранный чат — участники откроют событие одним кликом.
+- **Telegram**: если человек не в сети, личные сообщения и упоминания будут переданы в Telegram (настройка в профиле «Сообщения чата в Telegram»). Достаточно ответить на такое сообщение в боте — ответ появится в чате OpsWatch.
+- **Уведомления на ПК**: новые сообщения всплывают в программе для Windows и в браузере, на вкладке — счётчик непрочитанных.
+- Сообщения можно исправить (стрелка ↑ в пустом поле — изменить последнее) и удалить. Чат можно выключить в **Настройках**.
+
+![Чат](docs/screenshots/chat.png)
+
+| | |
+| --- | --- |
+| ![Новая группа по ролям](docs/screenshots/chat-group.png) | ![Участники группы](docs/screenshots/chat-members.png) |
+
 ### Маршрутизация и защита от спама
 
 - **Правила** проверяются по порядку: категории, источники, типы событий (`source.down`, `backup.*`, `check.*`…), минимальная важность → роли и пользователи.
@@ -280,7 +300,7 @@ docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
 ## Разработка
 
 ```bash
-git clone https://github.com/artemalekseev926-byte/win.git && cd win
+git clone https://github.com/artemalekseev926-byte/OpsWatch.git && cd OpsWatch
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev,desktop]"
 pytest -q

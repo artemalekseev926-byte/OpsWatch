@@ -53,6 +53,7 @@ async def meta(user: User | None = Depends(optional_user), rt=Depends(get_rt)):
         "statuses": [{"id": k, "title": tr(v)} for k, v in EVENT_STATUS_TITLES.items()],
         "languages": [{"id": k, "title": v} for k, v in LANGUAGE_TITLES.items()],
         "language": current_language(),
+        "chat_enabled": rt.chat.enabled(),
     }
     if user is not None and user.status == "active":
         async with rt.db.session() as session:
@@ -256,7 +257,7 @@ async def notifications(limit: int = 30, user: User = Depends(current_user), rt=
 
 
 @router.get("/notifications/poll")
-async def poll_notifications(after: int = -1, user: User = Depends(current_user), rt=Depends(get_rt)):
+async def poll_notifications(after: int = -1, chat_after: int = -1, user: User = Depends(current_user), rt=Depends(get_rt)):
     async with rt.db.session() as session:
         last_id = await session.scalar(select(func.max(Notification.id)).where(Notification.user_id == user.id)) or 0
         items = []
@@ -274,7 +275,16 @@ async def poll_notifications(after: int = -1, user: User = Depends(current_user)
             select(func.count(Notification.id)).where(Notification.user_id == user.id, Notification.is_read.is_(False))
         )
         counts = await open_counts(session, user) if user.status == "active" else {}
-    return {"items": items, "unread": unread, "last_id": last_id, "desktop": user.notify_desktop, "open": counts}
+    chat = {"enabled": False, "unread": 0, "last_id": 0, "items": []}
+    if user.status == "active" and rt.chat.enabled():
+        rt.chat.hub.touch(user.id)
+        chat = {
+            "enabled": True,
+            "unread": await rt.chat.unread_total(user),
+            "last_id": rt.chat.hub.last_id,
+            "items": await rt.chat.desktop_items(user, chat_after),
+        }
+    return {"items": items, "unread": unread, "last_id": last_id, "desktop": user.notify_desktop, "open": counts, "chat": chat}
 
 
 @router.post("/notifications/read")

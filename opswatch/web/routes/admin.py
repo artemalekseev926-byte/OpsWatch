@@ -281,7 +281,10 @@ async def update_user(user_id: int, data: UserUpdate, admin: User = Depends(requ
         await session.commit()
         target = await session.get(User, user_id)
         await session.refresh(target)
-        return user_dict(target)
+        result = user_dict(target)
+    if "status" in changes or "role_id" in changes:
+        await rt.chat.sync_user(user_id)
+    return result
 
 
 @router.post("/users/{user_id}/approve")
@@ -296,6 +299,7 @@ async def approve_user(user_id: int, data: ApproveIn, admin: User = Depends(requ
         await session.commit()
         await session.refresh(target)
         result = user_dict(target)
+    await rt.chat.sync_user(user_id)
     await _notify_user(rt, target, tr("✅ Ваша учётная запись OpsWatch подтверждена. Роль: <b>{title}</b>.", title=role.title))
     return result
 

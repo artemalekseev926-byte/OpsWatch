@@ -17,6 +17,7 @@ from opswatch.i18n import current_language, default_language, language, tr
 from opswatch.models import Event, Source, User
 from opswatch.permissions import has_perm, visible_categories
 from opswatch.services.bugs import create_bug, save_attachment
+from opswatch.services.chat import ChatError, reply_room
 from opswatch.services.queries import event_for_user, open_counts, visible_events_query
 from opswatch.services.subscriptions import cycle_state, get_states
 
@@ -31,7 +32,8 @@ HELP = (
     "/subscribe — подписки на категории\n"
     "/bug текст — сообщить об ошибке (можно приложить скриншот с подписью /bug)\n"
     "/unlink — отвязать Telegram от аккаунта\n\n"
-    "Кнопки под уведомлениями: «Принял», «Решено», «Подробнее»."
+    "Кнопки под уведомлениями: «Принял», «Решено», «Подробнее».\n"
+    "Сообщения из чата OpsWatch приходят сюда, когда вы не в сети: ответьте на такое сообщение, чтобы написать в чат."
 )
 
 
@@ -81,6 +83,11 @@ class LanguageMiddleware(BaseMiddleware):
             lang = "ru" if sender.language_code.lower().startswith(("ru", "uk", "be", "kk")) else "en"
         with language(lang or default_language()):
             return await handler(event, data)
+
+
+def is_chat_reply(message: Message) -> bool:
+    reply = message.reply_to_message
+    return reply is not None and reply_room(reply.text or reply.caption) is not None
 
 
 def build_router() -> Router:
@@ -315,6 +322,19 @@ def build_router() -> Router:
             await callback.answer(tr("Отмечено как решённое ✅"))
         else:
             await callback.answer()
+
+    @router.message(F.text & ~F.text.startswith("/"), is_chat_reply)
+    async def chat_reply(message: Message, rt) -> None:
+        room_id = reply_room(message.reply_to_message.text)
+        try:
+            result = await rt.chat.post_from_telegram(message.chat.id, room_id, message.text)
+        except ChatError as exc:
+            await message.answer(exc.message)
+            return
+        if result["title"]:
+            await message.answer(tr("✅ Отправлено в чат «{title}»", title=esc(result["title"])))
+        else:
+            await message.answer(tr("✅ Отправлено"))
 
     @router.message(F.text & ~F.text.startswith("/"))
     async def fallback(message: Message, rt) -> None:

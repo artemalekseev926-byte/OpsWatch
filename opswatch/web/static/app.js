@@ -60,8 +60,10 @@ const S = {
   meta: null,
   route: "overview",
   unread: 0,
+  chatUnread: 0,
   open: {},
   lastNotif: -1,
+  lastChat: -1,
   pollTimer: null,
   refreshTimer: null,
   refresh: null,
@@ -108,6 +110,10 @@ const ICONS = {
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   chart: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
   globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
+  message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  bellOff: '<path d="M8.7 3A6 6 0 0 1 18 8a21.3 21.3 0 0 0 .6 5"/><path d="M17 17H3s3-2 3-9a4.67 4.67 0 0 1 .3-1.7"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/><path d="m2 2 20 20"/>',
+  arrowLeft: '<path d="m12 19-7-7 7-7M19 12H5"/>',
   server: '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
 };
 
@@ -175,7 +181,7 @@ async function api(path, opts = {}) {
   }
   let res;
   try {
-    res = await fetch(path, { method: opts.method || (body !== undefined ? "POST" : "GET"), headers, body });
+    res = await fetch(path, { method: opts.method || (body !== undefined ? "POST" : "GET"), headers, body, signal: opts.signal });
   } catch (e) {
     throw new Error(t("Сервер недоступен"));
   }
@@ -642,6 +648,7 @@ function connectorOf(type) {
 
 const TABS = [
   { id: "overview", title: t("Обзор"), show: () => true },
+  { id: "chat", title: t("Чат"), show: () => !!(S.meta && S.meta.chat_enabled), badge: "chat" },
   { id: "monitoring", title: t("Мониторинг"), show: () => can("monitoring.view"), cat: "monitoring" },
   { id: "databases", title: t("Базы данных"), show: () => can("databases.view"), cat: "database" },
   { id: "onec", title: t("1С"), show: () => can("onec.view"), cat: "onec" },
@@ -685,6 +692,9 @@ async function boot() {
   applyTheme();
   window.addEventListener("hashchange", onHash);
   window.addEventListener("pywebviewready", syncBridge);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && S.route === "chat") chatMarkRead();
+  });
   document.addEventListener("click", (e) => {
     if (S.dropdown && !S.dropdown.contains(e.target) && !e.target.closest("[data-dropdown]")) closeDropdown();
   });
@@ -715,6 +725,10 @@ function onHash() {
     return;
   }
   if (!S.me) return;
+  if (route === "chat" && S.route === "chat" && CHAT.el && allowedRoute("chat")) {
+    chatSelect(param ? Number(param) : null);
+    return;
+  }
   S.route = allowedRoute(route) ? route : S.me.status === "active" ? "overview" : "profile";
   renderPage();
 }
@@ -749,7 +763,8 @@ function topbar() {
       tabs.append(h("span", { class: "tab-sep" }));
       continue;
     }
-    tabs.append(h("a", { class: "tab", href: "#/" + tab.id, "data-tab": tab.id }, tab.title, h("span", { class: "count hidden", "data-count": tab.cat || "" })));
+    const count = tab.badge === "chat" ? h("span", { class: "count accent hidden", "data-chat-count": "1" }) : h("span", { class: "count hidden", "data-count": tab.cat || "" });
+    tabs.append(h("a", { class: "tab", href: "#/" + tab.id, "data-tab": tab.id }, tab.title, count));
   }
   const initials = (S.me.full_name || S.me.username).split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase();
   return h(
@@ -776,6 +791,10 @@ function updateBadges() {
     bell.textContent = S.unread > 99 ? "99+" : String(S.unread);
     bell.classList.toggle("hidden", !S.unread);
   }
+  document.querySelectorAll("[data-chat-count]").forEach((el) => {
+    el.textContent = S.chatUnread > 99 ? "99+" : String(S.chatUnread);
+    el.classList.toggle("hidden", !S.chatUnread);
+  });
   document.querySelectorAll("[data-count]").forEach((el) => {
     const cat = el.dataset.count;
     const n = cat && S.open[cat] ? S.open[cat].critical || 0 : 0;
@@ -881,7 +900,7 @@ async function poll() {
   if (!S.token) return;
   let data;
   try {
-    data = await api("/api/notifications/poll?after=" + S.lastNotif, { silent401: false });
+    data = await api("/api/notifications/poll?after=" + S.lastNotif + "&chat_after=" + S.lastChat, { silent401: false });
   } catch (e) {
     return;
   }
@@ -889,9 +908,16 @@ async function poll() {
   S.lastNotif = Math.max(data.last_id || 0, S.lastNotif, 0);
   S.unread = data.unread || 0;
   S.open = data.open || {};
+  const chat = data.chat || {};
+  const chatNew = S.lastChat >= 0;
+  S.lastChat = Math.max(chat.last_id || 0, S.lastChat, 0);
+  if (S.route !== "chat") S.chatUnread = chat.unread || 0;
   updateBadges();
   if (isNew && data.items.length && data.desktop && !bridge()) {
     for (const n of data.items) browserNotify(n);
+  }
+  if (chatNew && S.route !== "chat" && data.desktop && !bridge()) {
+    for (const c of chat.items || []) browserNotify({ id: "c" + c.id, title: "💬 " + c.title, body: c.body, chat_room: c.room_id });
   }
 }
 
@@ -901,7 +927,8 @@ function browserNotify(n) {
     const note = new Notification(n.title, { body: n.body || "", tag: "ow-" + n.id, icon: "/favicon.svg" });
     note.onclick = () => {
       window.focus();
-      if (n.event_id) openEvent(n.event_id);
+      if (n.chat_room) navigate("chat/" + n.chat_room);
+      else if (n.event_id) openEvent(n.event_id);
       note.close();
     };
   } catch (e) {
@@ -921,9 +948,12 @@ function syncBridge() {
 }
 
 function logoutLocal() {
+  chatStop();
   S.token = "";
   S.me = null;
   S.lastNotif = -1;
+  S.lastChat = -1;
+  S.chatUnread = 0;
   store("ow_token", "");
   syncBridge();
   render();
@@ -1047,6 +1077,8 @@ async function renderPage() {
   if (!page) return;
   closeDropdown();
   highlightTabs();
+  chatStop();
+  page.classList.toggle("page-chat", S.route === "chat");
   S.refresh = null;
   const seq = ++S.seq;
   page.replaceChildren(loading());
@@ -1404,6 +1436,9 @@ async function openEvent(id) {
     manage ? field(t("Комментарий"), note) : null
   );
   const actions = [];
+  if (S.meta.chat_enabled) {
+    actions.push(h("button", { class: "btn", style: "margin-right:auto", onclick: () => { m.close(); shareEventDialog(e); } }, icon("message"), t("Обсудить в чате")));
+  }
   if (manage && e.status === "new") {
     actions.push(h("button", { class: "btn", onclick: async () => { const r = await guard(() => api(`/api/events/${id}/ack`, { body: {} }), t("Принято в работу")); if (r) { m.close(); openEvent(id); if (S.refresh) S.refresh(); } } }, icon("check"), t("Принял")));
   }
@@ -2010,6 +2045,7 @@ async function pageUsers(root) {
                 h(
                   "td",
                   { class: "right nowrap" },
+                  S.meta.chat_enabled && u.status === "active" && u.id !== S.me.id ? h("button", { class: "btn sm ghost", title: t("Написать в чат"), onclick: () => openDirect(u.id) }, icon("message")) : null,
                   h("button", { class: "btn sm ghost", title: t("Сбросить пароль"), onclick: () => resetPassword(u) }, t("Пароль")),
                   u.is_superuser || u.id === S.me.id ? null : h("button", { class: "btn sm ghost danger", onclick: () => confirmDialog(t("Удалить пользователя {name}?", { name: u.username }), async () => { await guard(() => api(`/api/users/${u.id}`, { method: "DELETE" }), t("Пользователь удалён")); renderPage(); }) }, icon("trash"))
                 )
@@ -2102,8 +2138,10 @@ async function pageSettings(root) {
     for (const key of Object.keys(payload)) if (key.startsWith("template_")) delete payload[key];
     const r = await guard(() => api("/api/settings", { method: "PUT", body: payload }), t("Настройки сохранены"));
     if (r) {
+      const chatBefore = S.meta.chat_enabled;
       S.meta = await api("/api/meta");
-      renderPage();
+      if (chatBefore !== S.meta.chat_enabled) render();
+      else renderPage();
     }
   };
   append(root, pageHead(t("Настройки"), t("Telegram, резервное копирование, хранилища"), h("button", { class: "btn primary", onclick: save }, t("Сохранить"))));
@@ -2129,7 +2167,8 @@ async function pageSettings(root) {
         null,
         h("div", { class: "grid-2" }, field(t("Группировать одинаковые события, мин"), input({ type: "number", min: 0, value: v.group_window_min, oninput: (e) => (v.group_window_min = Number(e.target.value)) }), t("Повторное уведомление не чаще этого интервала")), field(t("Хранить историю, дней"), input({ type: "number", min: 1, value: v.event_retention_days, oninput: (e) => (v.event_retention_days = Number(e.target.value)) }))),
         h("div", { class: "grid-2" }, field(t("Язык системных событий"), select(Object.entries(LANGS), v.language || "ru", { onchange: (e) => (v.language = e.target.value) }), t("На этом языке создаются тексты событий от источников, бэкапов и системы")), field(t("Хранить историю графиков, дней"), input({ type: "number", min: 1, value: v.metric_retention_days, oninput: (e) => (v.metric_retention_days = Number(e.target.value)) }))),
-        checkbox(t("Разрешить регистрацию новых пользователей"), v.registration_enabled, (x) => (v.registration_enabled = x))
+        checkbox(t("Разрешить регистрацию новых пользователей"), v.registration_enabled, (x) => (v.registration_enabled = x)),
+        checkbox(t("Включить чат между сотрудниками"), v.chat_enabled, (x) => (v.chat_enabled = x))
       )
     )
   );
@@ -2303,7 +2342,7 @@ async function pageProfile(root) {
   if (me.status !== "active") {
     root.append(h("div", { class: "notice warning" }, icon("alert"), h("div", null, h("strong", null, t("Учётная запись ожидает подтверждения администратором. ")), t("Пока можно заполнить профиль и привязать Telegram — уведомления начнут приходить после выдачи прав."))));
   }
-  const p = { full_name: me.full_name, email: me.email, telegram_username: me.telegram_username, notify_telegram: me.notify_telegram, notify_desktop: me.notify_desktop, quiet_start: me.quiet_start, quiet_end: me.quiet_end };
+  const p = { full_name: me.full_name, email: me.email, telegram_username: me.telegram_username, notify_telegram: me.notify_telegram, notify_desktop: me.notify_desktop, quiet_start: me.quiet_start, quiet_end: me.quiet_end, chat_telegram: me.chat_telegram };
   const saveProfile = async (msg = t("Сохранено")) => {
     const r = await guard(() => api("/api/profile", { method: "PUT", body: p }), msg);
     if (r) {
@@ -2463,6 +2502,7 @@ async function pageProfile(root) {
         "div",
         null,
         h("label", { class: "switch" }, h("div", null, h("div", null, "Telegram"), h("div", { class: "muted small" }, t("Личные сообщения от бота"))), h("input", { type: "checkbox", checked: p.notify_telegram, onchange: (e) => { p.notify_telegram = e.target.checked; saveProfile(); } })),
+        S.meta.chat_enabled && me.status === "active" ? h("label", { class: "switch" }, h("div", null, h("div", null, t("Сообщения чата в Telegram")), h("div", { class: "muted small" }, t("Личные сообщения и упоминания придут в Telegram, когда вы не в сети. Ответить можно прямо в боте"))), h("input", { type: "checkbox", checked: p.chat_telegram, onchange: (e) => { p.chat_telegram = e.target.checked; saveProfile(); } })) : null,
         h("label", { class: "switch" }, h("div", null, h("div", null, inDesktop ? t("Уведомления Windows") : t("Уведомления на этом компьютере")), h("div", { class: "muted small" }, inDesktop ? t("Программа сама покажет всплывающие уведомления, даже свёрнутая в трей") : t("Всплывающие уведомления браузера, пока открыта вкладка"))), desktopToggle),
         h(
           "div",
@@ -2500,8 +2540,973 @@ async function pageProfile(root) {
   }
 }
 
+const CHAT = {
+  rooms: [],
+  contacts: [],
+  current: null,
+  room: null,
+  messages: [],
+  hasMore: false,
+  rev: null,
+  last: 0,
+  loop: 0,
+  controller: null,
+  select: 0,
+  editing: null,
+  filter: "",
+  readTimer: null,
+  el: null,
+};
+
+function hueOf(seed) {
+  return (Number(seed || 0) * 47) % 360;
+}
+
+function initialsOf(name) {
+  return (name || "?").trim().split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase() || "?";
+}
+
+function chatAvatar(name, seed, opts = {}) {
+  return h(
+    "span",
+    { class: "chat-avatar" + (opts.group ? " group" : "") + (opts.small ? " small" : ""), style: `--h:${hueOf(seed)}`, "aria-hidden": "true" },
+    opts.group ? icon("users") : initialsOf(name),
+    opts.online ? h("span", { class: "presence" }) : null
+  );
+}
+
+function roleTitle(name) {
+  const role = (S.meta.roles || []).find((r) => r.name === name);
+  return role ? role.title : name;
+}
+
+function chatTime(iso) {
+  const d = parseDate(iso);
+  return d ? d.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" }) : "";
+}
+
+function chatDay(iso) {
+  const d = parseDate(iso);
+  if (!d) return "";
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return t("Сегодня");
+  if (d.toDateString() === yesterday.toDateString()) return t("Вчера");
+  return d.toLocaleDateString(LOCALE, { day: "numeric", month: "long", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
+}
+
+function chatStamp(iso) {
+  const d = parseDate(iso);
+  if (!d) return "";
+  if (d.toDateString() === new Date().toDateString()) return chatTime(iso);
+  return d.toLocaleDateString(LOCALE, { day: "2-digit", month: "2-digit" });
+}
+
+function chatText(text) {
+  const out = [];
+  const re = /(https?:\/\/[^\s<>"]+)|(@[A-Za-z0-9._-]{3,32})/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m[1]) out.push(h("a", { href: m[1], target: "_blank", rel: "noopener noreferrer" }, m[1]));
+    else out.push(h("span", { class: "mention" + (m[2].slice(1).toLowerCase() === S.me.username.toLowerCase() ? " me" : "") }, m[2]));
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+function systemText(m) {
+  const d = m.data || {};
+  const names = (d.names || []).join(", ");
+  const roles = (d.roles || []).map(roleTitle).join(", ");
+  switch (d.code) {
+    case "created":
+      return t("{who} · создана группа «{title}»", { who: d.who, title: d.title });
+    case "added":
+      return roles ? t("{who} · добавлены участники ({roles}): {names}", { who: d.who, roles, names }) : t("{who} · добавлены участники: {names}", { who: d.who, names });
+    case "removed":
+      return t("{who} · исключены из группы: {names}", { who: d.who, names });
+    case "left":
+      return t("{who} · выход из группы", { who: d.who });
+    case "renamed":
+      return t("{who} · новое название: «{title}»", { who: d.who, title: d.title });
+    case "auto_added":
+      return t("Добавлены по роли «{role}»: {names}", { role: roleTitle(d.role), names });
+    case "auto_removed":
+      return t("Роль изменилась, исключены: {names}", { names });
+    default:
+      return "";
+  }
+}
+
+function messagePreview(room) {
+  const lm = room.last_message;
+  if (!lm) return room.kind === "group" ? t("Участников: {n}", { n: room.member_count }) : t("Нет сообщений");
+  if (lm.kind === "system") return systemText(lm);
+  if (lm.deleted) return t("Сообщение удалено");
+  const ev = (lm.data && lm.data.event) || null;
+  const body = ev ? "⚠ " + ev.title + (lm.text ? " · " + lm.text : "") : lm.text;
+  const who = lm.user_id === S.me.id ? t("Вы") : room.kind === "group" ? (lm.author || "").split(" ")[0] : "";
+  return who ? `${who}: ${body}` : body;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function chatStop() {
+  CHAT.loop++;
+  if (CHAT.controller) CHAT.controller.abort();
+  CHAT.controller = null;
+  CHAT.el = null;
+}
+
+async function pageChat(root) {
+  chatStop();
+  const raw = location.hash.replace(/^#\/?/, "").split("/");
+  const wanted = raw[1] ? Number(raw[1]) : null;
+  const [rooms, contacts] = await Promise.all([api("/api/chat/rooms"), api("/api/chat/contacts")]);
+  CHAT.rooms = rooms.items;
+  CHAT.contacts = contacts.items;
+  CHAT.rev = rooms.rev;
+  CHAT.last = rooms.last_id;
+  CHAT.current = null;
+  CHAT.room = null;
+  CHAT.messages = [];
+  CHAT.editing = null;
+  S.chatUnread = rooms.unread;
+  updateBadges();
+  const search = input({ type: "search", class: "chat-search", placeholder: t("Поиск чатов и сотрудников"), value: CHAT.filter, oninput: (e) => { CHAT.filter = e.target.value; renderRoomList(); } });
+  const list = h("div", { class: "chat-list" });
+  const main = h("section", { class: "chat-main" });
+  const side = h(
+    "aside",
+    { class: "chat-side" },
+    h(
+      "div",
+      { class: "chat-side-head" },
+      h("h2", null, t("Чат")),
+      h(
+        "div",
+        { class: "row", style: "gap:4px" },
+        h("button", { class: "icon-btn", title: t("Написать сотруднику"), onclick: newDirectDialog }, icon("edit")),
+        h("button", { class: "icon-btn", title: t("Новая группа"), onclick: () => groupDialog(null) }, icon("users"))
+      )
+    ),
+    h("div", { class: "chat-search-wrap" }, search),
+    list
+  );
+  const box = h("div", { class: "chat" }, side, main);
+  CHAT.el = { box, list, main, search };
+  root.append(box);
+  renderRoomList();
+  setTimeout(() => {
+    if (!CHAT.el) return;
+    chatSelect(wanted && CHAT.rooms.some((r) => r.id === wanted) ? wanted : null);
+    chatLoop();
+  }, 0);
+}
+
+function renderRoomList() {
+  if (!CHAT.el) return;
+  const q = CHAT.filter.trim().toLowerCase();
+  const rooms = CHAT.rooms.filter((r) => !q || r.title.toLowerCase().includes(q) || (r.peer && r.peer.username.toLowerCase().includes(q)));
+  const items = rooms.map(roomItem);
+  if (q) {
+    const direct = new Set(CHAT.rooms.filter((r) => r.kind === "direct" && r.peer).map((r) => r.peer.id));
+    const people = CHAT.contacts.filter((c) => !direct.has(c.id) && (c.name.toLowerCase().includes(q) || c.username.toLowerCase().includes(q) || (c.role_title || "").toLowerCase().includes(q)));
+    if (people.length) {
+      items.push(h("div", { class: "chat-list-label" }, t("Сотрудники")));
+      for (const c of people) items.push(contactItem(c, () => openDirect(c.id)));
+    }
+  }
+  if (!items.length) items.push(h("div", { class: "chat-list-empty" }, q ? t("Ничего не найдено") : t("Чатов пока нет. Напишите коллеге или создайте группу.")));
+  CHAT.el.list.replaceChildren(...items);
+}
+
+function roomItem(r) {
+  return h(
+    "a",
+    { class: "chat-room" + (r.id === CHAT.current ? " active" : "") + (r.unread && !r.muted ? " unread" : ""), href: "#/chat/" + r.id },
+    chatAvatar(r.title, r.peer ? r.peer.id : r.id + 7, { group: r.kind === "group", online: r.peer && r.peer.online }),
+    h(
+      "div",
+      { class: "chat-room-body" },
+      h("div", { class: "chat-room-top" }, h("span", { class: "chat-room-title" }, r.title), r.muted ? h("span", { class: "chat-muted", title: t("Без звука") }, icon("bellOff")) : null, h("span", { class: "chat-room-time" }, r.last_message ? chatStamp(r.last_message.created_at) : "")),
+      h("div", { class: "chat-room-bottom" }, h("span", { class: "chat-room-preview" }, messagePreview(r)), r.unread ? h("span", { class: "chat-unread" + (r.muted ? " muted" : "") }, r.unread > 99 ? "99+" : String(r.unread)) : null)
+    )
+  );
+}
+
+function contactItem(c, onclick, extra) {
+  return h(
+    "button",
+    { class: "chat-contact", type: "button", onclick },
+    chatAvatar(c.name, c.id, { online: c.online, small: true }),
+    h("div", { class: "grow" }, h("div", { class: "chat-contact-name" }, c.name), h("div", { class: "muted small" }, [c.role_title, c.online ? t("в сети") : ""].filter(Boolean).join(" · "))),
+    extra || null
+  );
+}
+
+async function openDirect(userId) {
+  const room = await guard(() => api("/api/chat/direct", { body: { user_id: userId } }));
+  if (!room) return null;
+  if (!CHAT.rooms.some((r) => r.id === room.id)) CHAT.rooms.unshift(room);
+  CHAT.filter = "";
+  if (CHAT.el) CHAT.el.search.value = "";
+  navigate("chat/" + room.id);
+  return room;
+}
+
+function chatEmpty() {
+  return h(
+    "div",
+    { class: "chat-empty" },
+    icon("message"),
+    h("h2", null, t("Выберите чат")),
+    h("p", { class: "muted" }, t("Напишите коллеге лично или соберите группу — участников можно добавить сразу по ролям.")),
+    h("div", { class: "row", style: "justify-content:center" }, h("button", { class: "btn", onclick: newDirectDialog }, icon("edit"), t("Написать сотруднику")), h("button", { class: "btn primary", onclick: () => groupDialog(null) }, icon("users"), t("Новая группа")))
+  );
+}
+
+async function chatSelect(id) {
+  if (!CHAT.el) return;
+  CHAT.current = id;
+  CHAT.editing = null;
+  CHAT.el.box.classList.toggle("has-room", !!id);
+  renderRoomList();
+  if (!id) {
+    CHAT.room = null;
+    CHAT.messages = [];
+    CHAT.el.main.replaceChildren(chatEmpty());
+    return;
+  }
+  const seq = ++CHAT.select;
+  CHAT.el.main.replaceChildren(loading());
+  let room;
+  let msgs;
+  try {
+    [room, msgs] = await Promise.all([api(`/api/chat/rooms/${id}`), api(`/api/chat/rooms/${id}/messages?limit=60`)]);
+  } catch (e) {
+    if (seq === CHAT.select && CHAT.el) CHAT.el.main.replaceChildren(h("div", { class: "chat-empty" }, icon("alert"), h("p", null, e.message)));
+    return;
+  }
+  if (seq !== CHAT.select || !CHAT.el) return;
+  CHAT.room = room;
+  CHAT.messages = msgs.items;
+  CHAT.hasMore = msgs.has_more;
+  renderMain();
+  scrollToBottom();
+  chatMarkRead();
+}
+
+function chatSubtitle(room) {
+  if (room.kind === "direct") {
+    if (!room.peer) return t("Пользователь удалён");
+    return [room.peer.online ? t("в сети") : t("не в сети"), room.peer.role_title].filter(Boolean).join(" · ");
+  }
+  const parts = [t("Участников: {n}", { n: room.member_count })];
+  if (room.roles && room.roles.length) parts.push(t("по ролям: {roles}", { roles: room.roles.map(roleTitle).join(", ") }));
+  return parts.join(" · ");
+}
+
+function renderMain() {
+  const room = CHAT.room;
+  if (!room || !CHAT.el) return;
+  const messages = h("div", { class: "chat-messages", onscroll: onMessagesScroll });
+  const jump = h("button", { class: "chat-jump hidden", onclick: () => scrollToBottom(true) }, t("Новые сообщения"), " ↓");
+  const head = h(
+    "header",
+    { class: "chat-head" },
+    h("button", { class: "icon-btn chat-back", title: t("Назад"), onclick: () => navigate("chat") }, icon("arrowLeft")),
+    h(
+      "button",
+      { class: "chat-head-info", onclick: chatInfo, title: room.kind === "group" ? t("Участники и настройки группы") : t("О собеседнике") },
+      chatAvatar(room.title, room.peer ? room.peer.id : room.id + 7, { group: room.kind === "group", online: room.peer && room.peer.online }),
+      h("div", { class: "chat-head-text" }, h("div", { class: "chat-head-title" }, room.title), h("div", { class: "muted small chat-head-sub" }, chatSubtitle(room)))
+    ),
+    h(
+      "div",
+      { class: "row", style: "gap:4px" },
+      h("button", { class: "icon-btn", title: room.muted ? t("Включить уведомления") : t("Без звука"), onclick: toggleMute }, icon(room.muted ? "bellOff" : "bell")),
+      h("button", { class: "icon-btn", title: t("Участники и настройки группы"), onclick: chatInfo }, icon(room.kind === "group" ? "users" : "info"))
+    )
+  );
+  const draft = CHAT.el.composer && CHAT.el.composer.roomId === room.id ? CHAT.el.composer.input.value : "";
+  CHAT.el.messages = messages;
+  CHAT.el.jump = jump;
+  CHAT.el.composer = composer();
+  CHAT.el.composer.input.value = draft;
+  CHAT.el.composer.sync();
+  CHAT.el.main.replaceChildren(head, h("div", { class: "chat-scroll-wrap" }, messages, jump), CHAT.el.composer.el);
+  renderMessages();
+}
+
+function renderMessages() {
+  const box = CHAT.el && CHAT.el.messages;
+  if (!box) return;
+  const nodes = [];
+  if (CHAT.hasMore) nodes.push(h("div", { class: "chat-more" }, h("button", { class: "btn sm", onclick: loadOlder }, t("Показать ранние сообщения"))));
+  else if (!CHAT.messages.length) nodes.push(h("div", { class: "chat-start muted small" }, t("Это начало переписки")));
+  let prev = null;
+  for (const m of CHAT.messages) {
+    if (!prev || chatDay(prev.created_at) !== chatDay(m.created_at)) nodes.push(h("div", { class: "chat-day" }, h("span", null, chatDay(m.created_at))));
+    nodes.push(messageNode(m, prev));
+    prev = m;
+  }
+  box.replaceChildren(...nodes);
+}
+
+function messageNode(m, prev) {
+  const room = CHAT.room;
+  if (m.kind === "system") return h("div", { class: "chat-system" }, systemText(m));
+  const mine = m.user_id === S.me.id;
+  const grouped =
+    prev &&
+    prev.kind !== "system" &&
+    prev.user_id === m.user_id &&
+    chatDay(prev.created_at) === chatDay(m.created_at) &&
+    parseDate(m.created_at) - parseDate(prev.created_at) < 5 * 60 * 1000;
+  const bubble = h("div", {
+    class: "chat-bubble",
+    onclick: (e) => {
+      if (e.target.closest("a, button")) return;
+      const row = e.currentTarget.parentElement;
+      const open = row.classList.contains("show-actions");
+      document.querySelectorAll(".chat-msg.show-actions").forEach((x) => x.classList.remove("show-actions"));
+      if (!open) row.classList.add("show-actions");
+    },
+  });
+  if (!mine && room.kind === "group" && !grouped) bubble.append(h("div", { class: "chat-author", style: `--h:${hueOf(m.user_id)}` }, m.author || t("Удалённый пользователь")));
+  if (m.deleted) {
+    bubble.append(h("div", { class: "chat-deleted" }, t("Сообщение удалено")));
+  } else {
+    if (m.kind === "event" && m.data && m.data.event) bubble.append(eventCard(m.data.event));
+    if (m.text) bubble.append(h("div", { class: "chat-text" }, chatText(m.text)));
+  }
+  const read = mine && room.kind === "direct" && !m.deleted && room.peer_read_id >= m.id;
+  bubble.append(
+    h(
+      "span",
+      { class: "chat-meta" },
+      m.data && m.data.via === "telegram" && !m.deleted ? h("span", { class: "chat-via", title: t("Отправлено из Telegram") }, icon("send")) : null,
+      m.edited_at && !m.deleted ? t("изменено") + " · " : "",
+      chatTime(m.created_at),
+      mine && room.kind === "direct" && !m.deleted ? h("span", { class: "chat-ticks" + (read ? " read" : ""), title: read ? t("Прочитано") : t("Отправлено") }, read ? "✓✓" : "✓") : null
+    )
+  );
+  const actions = [];
+  if (!m.deleted && mine) actions.push(h("button", { class: "icon-btn", title: t("Изменить"), onclick: () => startEdit(m) }, icon("edit")));
+  if (!m.deleted && (mine || room.can_manage)) actions.push(h("button", { class: "icon-btn", title: t("Удалить"), onclick: () => deleteMessage(m) }, icon("trash")));
+  const showAvatar = !mine && room.kind === "group";
+  return h(
+    "div",
+    { class: "chat-msg" + (mine ? " mine" : "") + (grouped ? " grouped" : ""), "data-id": m.id },
+    showAvatar ? (grouped ? h("span", { class: "chat-avatar-spacer" }) : chatAvatar(m.author, m.user_id, { small: true })) : null,
+    bubble,
+    actions.length ? h("div", { class: "chat-actions" }, actions) : null
+  );
+}
+
+function eventCard(ev) {
+  return h(
+    "button",
+    { class: "chat-event", type: "button", onclick: () => openEvent(ev.id), title: t("Открыть событие") },
+    h("span", { class: "dot " + ev.severity }),
+    h("span", { class: "grow" }, h("span", { class: "chat-event-title" }, ev.title), h("span", { class: "muted small" }, [SEV[ev.severity], CAT[ev.category], ev.source_name, "#" + ev.id].filter(Boolean).join(" · ")))
+  );
+}
+
+function nearBottom() {
+  const box = CHAT.el && CHAT.el.messages;
+  return !box || box.scrollHeight - box.scrollTop - box.clientHeight < 140;
+}
+
+function scrollToBottom(smooth = false) {
+  const box = CHAT.el && CHAT.el.messages;
+  if (!box) return;
+  box.scrollTo({ top: box.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  if (CHAT.el.jump) CHAT.el.jump.classList.add("hidden");
+}
+
+function onMessagesScroll() {
+  if (nearBottom()) {
+    if (CHAT.el.jump) CHAT.el.jump.classList.add("hidden");
+    chatMarkRead();
+  }
+}
+
+async function loadOlder() {
+  const first = CHAT.messages[0];
+  if (!first || !CHAT.current) return;
+  const box = CHAT.el.messages;
+  const before = box.scrollHeight - box.scrollTop;
+  const data = await guard(() => api(`/api/chat/rooms/${CHAT.current}/messages?before=${first.id}&limit=60`));
+  if (!data || !CHAT.el) return;
+  CHAT.messages = data.items.concat(CHAT.messages);
+  CHAT.hasMore = data.has_more;
+  renderMessages();
+  box.scrollTop = box.scrollHeight - before;
+}
+
+function chatAppend(items) {
+  if (!items.length || !CHAT.room) return;
+  const known = new Set(CHAT.messages.map((m) => m.id));
+  const fresh = items.filter((m) => m.room_id === CHAT.current && !known.has(m.id));
+  if (!fresh.length) return;
+  const stick = nearBottom() || fresh.some((m) => m.user_id === S.me.id);
+  CHAT.messages = CHAT.messages.concat(fresh).sort((a, b) => a.id - b.id);
+  renderMessages();
+  if (stick) {
+    scrollToBottom();
+    chatMarkRead();
+  } else if (CHAT.el.jump) {
+    CHAT.el.jump.classList.remove("hidden");
+  }
+}
+
+function chatMarkRead() {
+  const room = CHAT.rooms.find((r) => r.id === CHAT.current);
+  const last = CHAT.messages[CHAT.messages.length - 1];
+  if (!CHAT.current || !last || document.hidden || !nearBottom()) return;
+  if (room && room.last_read_id >= last.id && !room.unread) return;
+  clearTimeout(CHAT.readTimer);
+  const roomId = CHAT.current;
+  CHAT.readTimer = setTimeout(async () => {
+    const r = await api(`/api/chat/rooms/${roomId}/read`, { body: { last_id: last.id } }).catch(() => null);
+    if (!r) return;
+    S.chatUnread = r.unread;
+    updateBadges();
+    const item = CHAT.rooms.find((x) => x.id === roomId);
+    if (item) {
+      item.last_read_id = r.last_read_id;
+      item.unread = 0;
+    }
+    renderRoomList();
+  }, 250);
+}
+
+async function chatRefreshRooms() {
+  const data = await api("/api/chat/rooms").catch(() => null);
+  if (!data || !CHAT.el) return;
+  CHAT.rooms = data.items;
+  S.chatUnread = data.unread;
+  updateBadges();
+  renderRoomList();
+}
+
+async function chatReloadCurrent() {
+  const id = CHAT.current;
+  if (!id || !CHAT.el) return;
+  let room;
+  let msgs;
+  try {
+    [room, msgs] = await Promise.all([api(`/api/chat/rooms/${id}`), api(`/api/chat/rooms/${id}/messages?limit=${Math.max(60, CHAT.messages.length)}`)]);
+  } catch (e) {
+    if (CHAT.current === id) {
+      toast(t("Вы больше не участник этого чата"), "error");
+      navigate("chat");
+    }
+    return;
+  }
+  if (CHAT.current !== id || !CHAT.el) return;
+  const stick = nearBottom();
+  const top = CHAT.el.messages ? CHAT.el.messages.scrollTop : 0;
+  CHAT.room = room;
+  CHAT.messages = msgs.items;
+  CHAT.hasMore = msgs.has_more;
+  renderMain();
+  if (stick) scrollToBottom();
+  else if (CHAT.el.messages) CHAT.el.messages.scrollTop = top;
+}
+
+async function chatLoop() {
+  const token = ++CHAT.loop;
+  let failures = 0;
+  while (token === CHAT.loop && S.route === "chat" && S.token) {
+    CHAT.controller = new AbortController();
+    let data;
+    try {
+      data = await api(`/api/chat/updates?after=${CHAT.last}&rev=${CHAT.rev}&timeout=25`, { signal: CHAT.controller.signal });
+      failures = 0;
+    } catch (e) {
+      if (token !== CHAT.loop) return;
+      failures++;
+      await sleep(Math.min(15000, 1500 * failures));
+      continue;
+    }
+    if (token !== CHAT.loop) return;
+    CHAT.last = Math.max(CHAT.last, data.last_id || 0);
+    const changed = data.rev !== CHAT.rev;
+    CHAT.rev = data.rev;
+    S.chatUnread = data.unread;
+    updateBadges();
+    chatAppend(data.messages || []);
+    if (changed && CHAT.current) await chatReloadCurrent();
+    if ((data.messages && data.messages.length) || changed) await chatRefreshRooms();
+    for (const m of data.messages || []) {
+      if (m.user_id !== S.me.id && m.kind !== "system" && (document.hidden || m.room_id !== CHAT.current)) chatNotify(m);
+    }
+  }
+}
+
+function chatNotify(m) {
+  if (bridge() || !S.me.notify_desktop || !("Notification" in window) || Notification.permission !== "granted") return;
+  const room = CHAT.rooms.find((r) => r.id === m.room_id);
+  if (room && room.muted) return;
+  const title = room && room.kind === "group" ? `${m.author} · ${room.title}` : m.author;
+  const body = m.text || (m.data && m.data.event ? m.data.event.title : "");
+  try {
+    const note = new Notification("💬 " + title, { body, tag: "ow-chat-" + m.id, icon: "/favicon.svg" });
+    note.onclick = () => {
+      window.focus();
+      navigate("chat/" + m.room_id);
+      note.close();
+    };
+  } catch (e) {
+    return;
+  }
+}
+
+function composer() {
+  const room = CHAT.room;
+  const ta = h("textarea", { class: "chat-input", rows: 1, placeholder: t("Сообщение…") });
+  const editBar = h("div", { class: "chat-editbar hidden" });
+  const suggest = h("div", { class: "chat-suggest hidden" });
+  const send = h("button", { class: "btn primary chat-send", title: t("Отправить (Enter)"), onclick: () => submit() }, icon("send"));
+  let options = [];
+  let active = 0;
+  function autosize() {
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+  }
+  function sync() {
+    if (CHAT.editing) {
+      editBar.classList.remove("hidden");
+      editBar.replaceChildren(icon("edit"), h("span", { class: "grow" }, t("Редактирование сообщения")), h("button", { class: "icon-btn", title: t("Отмена"), onclick: cancelEdit }, icon("x")));
+    } else {
+      editBar.classList.add("hidden");
+    }
+    autosize();
+  }
+  function cancelEdit() {
+    CHAT.editing = null;
+    ta.value = "";
+    sync();
+    ta.focus();
+  }
+  function mentionQuery() {
+    const before = ta.value.slice(0, ta.selectionStart);
+    const m = before.match(/(^|\s)@([A-Za-z0-9._-]*)$/);
+    return m ? m[2].toLowerCase() : null;
+  }
+  function updateSuggest() {
+    const q = room.kind === "group" ? mentionQuery() : null;
+    if (q === null) {
+      suggest.classList.add("hidden");
+      options = [];
+      return;
+    }
+    options = (room.members || []).filter((m) => !m.me && (m.username.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))).slice(0, 6);
+    if (!options.length) {
+      suggest.classList.add("hidden");
+      return;
+    }
+    active = Math.min(active, options.length - 1);
+    suggest.replaceChildren(
+      ...options.map((m, i) =>
+        h("button", { type: "button", class: "chat-suggest-item" + (i === active ? " active" : ""), onmousedown: (e) => { e.preventDefault(); pick(m); } }, chatAvatar(m.name, m.id, { small: true }), h("span", null, m.name), h("span", { class: "muted small" }, "@" + m.username))
+      )
+    );
+    suggest.classList.remove("hidden");
+  }
+  function pick(member) {
+    const pos = ta.selectionStart;
+    const before = ta.value.slice(0, pos).replace(/@([A-Za-z0-9._-]*)$/, "@" + member.username + " ");
+    ta.value = before + ta.value.slice(pos);
+    ta.selectionStart = ta.selectionEnd = before.length;
+    suggest.classList.add("hidden");
+    options = [];
+    ta.focus();
+    autosize();
+  }
+  async function submit() {
+    const text = ta.value.trim();
+    if (!text) return;
+    if (CHAT.editing) {
+      const id = CHAT.editing;
+      const r = await guard(() => api(`/api/chat/messages/${id}`, { method: "PUT", body: { text } }));
+      if (!r) return;
+      CHAT.messages = CHAT.messages.map((m) => (m.id === r.id ? r : m));
+      cancelEdit();
+      renderMessages();
+      return;
+    }
+    ta.value = "";
+    autosize();
+    send.disabled = true;
+    const r = await guard(() => api(`/api/chat/rooms/${room.id}/messages`, { body: { text } }));
+    send.disabled = false;
+    if (!r) {
+      ta.value = text;
+      autosize();
+      return;
+    }
+    chatAppend([r]);
+    const item = CHAT.rooms.find((x) => x.id === room.id);
+    if (item) {
+      item.last_message = r;
+      item.last_message_at = r.created_at;
+      CHAT.rooms = [item].concat(CHAT.rooms.filter((x) => x.id !== item.id));
+      renderRoomList();
+    }
+    ta.focus();
+  }
+  ta.addEventListener("input", () => {
+    autosize();
+    updateSuggest();
+  });
+  ta.addEventListener("keydown", (e) => {
+    if (options.length && !suggest.classList.contains("hidden")) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        active = (active + (e.key === "ArrowDown" ? 1 : options.length - 1)) % options.length;
+        updateSuggest();
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        pick(options[active]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        suggest.classList.add("hidden");
+        options = [];
+        return;
+      }
+    }
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      submit();
+    } else if (e.key === "Escape" && CHAT.editing) {
+      e.stopPropagation();
+      cancelEdit();
+    } else if (e.key === "ArrowUp" && !ta.value) {
+      const own = [...CHAT.messages].reverse().find((m) => m.user_id === S.me.id && !m.deleted && m.kind !== "system");
+      if (own) {
+        e.preventDefault();
+        startEdit(own);
+      }
+    }
+  });
+  ta.addEventListener("blur", () => setTimeout(() => suggest.classList.add("hidden"), 150));
+  const el = h(
+    "footer",
+    { class: "chat-composer" },
+    editBar,
+    suggest,
+    h("div", { class: "chat-compose-row" }, ta, send),
+    h("div", { class: "chat-hint faint" }, room.kind === "group" ? t("Enter — отправить, Shift+Enter — новая строка, @ — упомянуть участника") : t("Enter — отправить, Shift+Enter — новая строка"))
+  );
+  setTimeout(() => ta.focus(), 0);
+  return { el, input: ta, sync, roomId: room.id };
+}
+
+function startEdit(m) {
+  if (!CHAT.el || !CHAT.el.composer) return;
+  CHAT.editing = m.id;
+  CHAT.el.composer.input.value = m.text;
+  CHAT.el.composer.sync();
+  CHAT.el.composer.input.focus();
+}
+
+function deleteMessage(m) {
+  confirmDialog(t("Удалить сообщение? Его не увидит никто из участников."), async () => {
+    const r = await guard(() => api(`/api/chat/messages/${m.id}`, { method: "DELETE" }));
+    if (!r) return;
+    CHAT.messages = CHAT.messages.map((x) => (x.id === r.id ? r : x));
+    if (CHAT.editing === m.id) CHAT.editing = null;
+    renderMessages();
+  });
+}
+
+async function toggleMute() {
+  const room = CHAT.room;
+  const r = await guard(() => api(`/api/chat/rooms/${room.id}/mute`, { method: "PUT", body: { muted: !room.muted } }), room.muted ? t("Уведомления включены") : t("Чат без звука"));
+  if (!r) return;
+  CHAT.room = Object.assign(CHAT.room, { muted: r.muted });
+  const stick = nearBottom();
+  renderMain();
+  if (stick) scrollToBottom();
+  chatRefreshRooms();
+}
+
+function newDirectDialog() {
+  let q = "";
+  const list = h("div", { class: "chat-picker" });
+  const draw = () => {
+    const items = CHAT.contacts.filter((c) => !q || c.name.toLowerCase().includes(q) || c.username.toLowerCase().includes(q) || (c.role_title || "").toLowerCase().includes(q));
+    const sorted = items.slice().sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+    list.replaceChildren(...(sorted.length ? sorted.map((c) => contactItem(c, async () => { m.close(); await openDirect(c.id); }, h("span", { class: "muted small" }, "@" + c.username))) : [emptyState("user", t("Сотрудники не найдены"))]));
+  };
+  const search = input({ type: "search", placeholder: t("Имя, логин или роль"), oninput: (e) => { q = e.target.value.trim().toLowerCase(); draw(); } });
+  draw();
+  const m = modal({ title: t("Написать сотруднику"), subtitle: t("Личная переписка один на один"), body: h("div", { class: "stack" }, search, list) });
+  setTimeout(() => search.focus(), 0);
+}
+
+async function groupDialog(room) {
+  const editing = !!room;
+  const contacts = (await api("/api/chat/contacts").catch(() => ({ items: CHAT.contacts }))).items;
+  CHAT.contacts = contacts;
+  const roles = S.meta.roles || [];
+  const myRole = S.me.role ? S.me.role.name : "";
+  const counts = {};
+  for (const c of contacts) if (c.role) counts[c.role] = (counts[c.role] || 0) + 1;
+  if (myRole) counts[myRole] = (counts[myRole] || 0) + 1;
+  const st = {
+    title: editing ? room.title : "",
+    description: editing ? room.description : "",
+    roles: new Set(editing ? room.roles : []),
+    sync: editing ? room.roles.length > 0 : true,
+    users: new Set(editing ? room.members.filter((m) => !m.via_role && !m.me).map((m) => m.id) : []),
+    q: "",
+  };
+  const byRole = (c) => c.role && st.roles.has(c.role);
+  const chipsBox = h("div", { class: "chips" });
+  const list = h("div", { class: "chat-picker compact" });
+  const summary = h("div", { class: "muted small" });
+  const syncBox = h("div");
+  function total() {
+    const ids = new Set([S.me.id]);
+    for (const c of contacts) if (st.users.has(c.id) || byRole(c)) ids.add(c.id);
+    return ids.size;
+  }
+  function drawChips() {
+    chipsBox.replaceChildren(
+      ...roles.map((r) =>
+        h(
+          "button",
+          { type: "button", class: "chip" + (st.roles.has(r.name) ? " active" : ""), disabled: !counts[r.name], onclick: () => { if (st.roles.has(r.name)) st.roles.delete(r.name); else st.roles.add(r.name); draw(); } },
+          r.title,
+          h("span", { class: "chip-count" }, String(counts[r.name] || 0))
+        )
+      )
+    );
+  }
+  function drawList() {
+    const q = st.q;
+    const items = contacts.filter((c) => !q || c.name.toLowerCase().includes(q) || c.username.toLowerCase().includes(q) || (c.role_title || "").toLowerCase().includes(q));
+    list.replaceChildren(
+      ...(items.length
+        ? items.map((c) => {
+            const covered = byRole(c);
+            const checked = covered || st.users.has(c.id);
+            return h(
+              "label",
+              { class: "chat-pick" + (covered ? " covered" : "") },
+              h("input", { type: "checkbox", checked, disabled: covered, onchange: (e) => { if (e.target.checked) st.users.add(c.id); else st.users.delete(c.id); drawSummary(); } }),
+              chatAvatar(c.name, c.id, { small: true, online: c.online }),
+              h("span", { class: "grow" }, h("span", { class: "chat-contact-name" }, c.name), h("span", { class: "muted small" }, c.role_title || t("Без роли"))),
+              covered ? h("span", { class: "badge accent" }, t("по роли")) : null
+            );
+          })
+        : [emptyState("user", t("Сотрудники не найдены"))])
+    );
+  }
+  function drawSummary() {
+    summary.textContent = t("Участников в группе: {n}", { n: total() });
+  }
+  function drawSync() {
+    syncBox.replaceChildren(
+      checkbox(t("Следить за ролями: новые сотрудники с этими ролями добавятся сами, при смене роли — исключатся"), st.sync, (v) => { st.sync = v; drawSummary(); })
+    );
+  }
+  function draw() {
+    drawChips();
+    drawList();
+    drawSummary();
+  }
+  draw();
+  drawSync();
+  const titleInput = input({ value: st.title, placeholder: t("Например: Дежурные сисадмины"), maxlength: 200, oninput: (e) => (st.title = e.target.value) });
+  const body = h(
+    "div",
+    { class: "stack" },
+    h("div", { class: "form-grid" }, field(t("Название *"), titleInput), field(t("Описание"), input({ value: st.description, placeholder: t("Зачем эта группа"), oninput: (e) => (st.description = e.target.value) }))),
+    h("div", null, h("div", { class: "label", style: "margin-bottom:6px" }, t("Участники по ролям")), chipsBox, h("div", { style: "margin-top:8px" }, syncBox)),
+    h("div", null, h("div", { class: "between", style: "margin-bottom:6px" }, h("div", { class: "label" }, t("Отдельные сотрудники")), input({ type: "search", class: "search", placeholder: t("Поиск"), oninput: (e) => { st.q = e.target.value.trim().toLowerCase(); drawList(); } })), list),
+    summary
+  );
+  const save = async () => {
+    if (!st.title.trim()) return toast(t("Укажите название группы"), "error");
+    let result;
+    if (!editing) {
+      result = await guard(() => api("/api/chat/rooms", { body: { title: st.title, description: st.description, user_ids: [...st.users], roles: [...st.roles], sync_roles: st.sync } }), t("Группа создана"));
+    } else {
+      result = await guard(async () => {
+        let r = await api(`/api/chat/rooms/${room.id}`, { method: "PUT", body: { title: st.title, description: st.description, roles: [...st.roles], sync_roles: st.sync } });
+        const present = new Set(r.members.map((m) => m.id));
+        const add = [...st.users].filter((id) => !present.has(id));
+        if (add.length) r = await api(`/api/chat/rooms/${room.id}/members`, { body: { user_ids: add } });
+        const keep = (m) => m.me || m.is_admin || m.via_role || st.users.has(m.id) || st.roles.has(contactRole(contacts, m.id));
+        for (const m of r.members.filter((x) => !keep(x))) {
+          r = (await api(`/api/chat/rooms/${room.id}/members/${m.id}`, { method: "DELETE" })) || r;
+        }
+        return r;
+      }, t("Группа сохранена"));
+    }
+    if (!result) return;
+    dlg.close();
+    if (CHAT.el) await chatRefreshRooms();
+    if (editing && CHAT.current === result.id) await chatReloadCurrent();
+    else navigate("chat/" + result.id);
+  };
+  const dlg = modal({
+    title: editing ? t("Настройки группы") : t("Новая группа"),
+    subtitle: editing ? room.title : t("Добавьте участников сразу по ролям или выберите сотрудников вручную"),
+    body,
+    wide: true,
+    foot: [h("button", { class: "btn", onclick: () => dlg.close() }, t("Отмена")), h("button", { class: "btn primary", onclick: save }, editing ? t("Сохранить") : t("Создать группу"))],
+  });
+  setTimeout(() => titleInput.focus(), 0);
+}
+
+function contactRole(contacts, id) {
+  const c = contacts.find((x) => x.id === id);
+  return c ? c.role : "";
+}
+
+function chatInfo() {
+  const room = CHAT.room;
+  if (!room) return;
+  if (room.kind === "direct") {
+    const p = room.peer;
+    const dlg = modal({
+      title: room.title,
+      subtitle: p ? "@" + p.username : "",
+      body: h(
+        "div",
+        { class: "stack" },
+        h("div", { class: "row" }, chatAvatar(room.title, p ? p.id : 0, { online: p && p.online }), h("div", null, h("div", { style: "font-weight:600" }, room.title), h("div", { class: "muted small" }, chatSubtitle(room)))),
+        h("div", { class: "muted small" }, t("Если собеседник не в сети, личные сообщения придут в Telegram, и ответить можно прямо оттуда."))
+      ),
+      foot: [h("button", { class: "btn", onclick: () => dlg.close() }, t("Закрыть"))],
+    });
+    return;
+  }
+  const rows = room.members.map((m) =>
+    h(
+      "div",
+      { class: "chat-member" },
+      chatAvatar(m.name, m.id, { small: true, online: m.online }),
+      h(
+        "div",
+        { class: "grow" },
+        h("div", { class: "chat-contact-name" }, m.name, m.me ? h("span", { class: "muted" }, " · " + t("вы")) : null),
+        h("div", { class: "muted small" }, [m.role_title, m.online ? t("в сети") : ""].filter(Boolean).join(" · "))
+      ),
+      m.is_admin ? h("span", { class: "badge accent" }, t("админ")) : null,
+      m.via_role ? h("span", { class: "badge outline", title: t("Добавлен автоматически по роли") }, t("по роли")) : null,
+      room.can_manage && !m.me
+        ? h(
+            "div",
+            { class: "row", style: "gap:2px" },
+            h("button", { class: "icon-btn", title: m.is_admin ? t("Снять права администратора") : t("Сделать администратором"), onclick: async () => { const r = await guard(() => api(`/api/chat/rooms/${room.id}/members/${m.id}`, { method: "PUT", body: { is_admin: !m.is_admin } })); if (r) { dlg.close(); CHAT.room = r; chatInfo(); } } }, icon("shield")),
+            h("button", { class: "icon-btn", title: t("Исключить из группы"), onclick: async () => { const r = await guard(() => api(`/api/chat/rooms/${room.id}/members/${m.id}`, { method: "DELETE" })); if (r) { dlg.close(); CHAT.room = r; chatInfo(); } } }, icon("x"))
+          )
+        : null
+    )
+  );
+  const foot = [
+    h("button", {
+      class: "btn danger",
+      onclick: () =>
+        confirmDialog(t("Покинуть группу «{title}»?", { title: room.title }), async () => {
+          const r = await guard(() => api(`/api/chat/rooms/${room.id}/members/${S.me.id}`, { method: "DELETE" }));
+          if (!r) return;
+          dlg.close();
+          await chatRefreshRooms();
+          navigate("chat");
+        }, t("Покинуть")),
+    }, icon("logout"), t("Покинуть группу")),
+  ];
+  if (room.can_manage) {
+    foot.push(
+      h("button", {
+        class: "btn danger",
+        onclick: () =>
+          confirmDialog(t("Удалить группу «{title}» вместе с перепиской?", { title: room.title }), async () => {
+            const r = await guard(() => api(`/api/chat/rooms/${room.id}`, { method: "DELETE" }), t("Группа удалена"));
+            if (!r) return;
+            dlg.close();
+            await chatRefreshRooms();
+            navigate("chat");
+          }),
+      }, icon("trash"), t("Удалить")),
+      h("button", { class: "btn primary", onclick: () => { dlg.close(); groupDialog(room); } }, icon("users"), t("Участники и роли"))
+    );
+  }
+  const dlg = modal({
+    title: room.title,
+    subtitle: chatSubtitle(room),
+    body: h("div", { class: "stack" }, room.description ? h("p", { class: "muted", style: "margin:0" }, room.description) : null, h("div", { class: "chat-members" }, rows)),
+    foot,
+    wide: true,
+  });
+}
+
+async function shareEventDialog(ev) {
+  let data;
+  try {
+    data = await api("/api/chat/rooms");
+  } catch (e) {
+    toast(e.message, "error");
+    return;
+  }
+  const contacts = (await api("/api/chat/contacts").catch(() => ({ items: [] }))).items;
+  const note = h("textarea", { placeholder: t("Комментарий (необязательно)"), style: "min-height:60px" });
+  let q = "";
+  const list = h("div", { class: "chat-picker" });
+  async function share(roomId) {
+    const r = await guard(() => api(`/api/chat/rooms/${roomId}/messages`, { body: { text: note.value, event_id: ev.id } }), t("Событие отправлено в чат"));
+    if (!r) return;
+    dlg.close();
+    navigate("chat/" + roomId);
+  }
+  function draw() {
+    const rooms = data.items.filter((r) => !q || r.title.toLowerCase().includes(q));
+    const direct = new Set(data.items.filter((r) => r.peer).map((r) => r.peer.id));
+    const people = contacts.filter((c) => !direct.has(c.id) && (!q || c.name.toLowerCase().includes(q) || c.username.toLowerCase().includes(q)));
+    const items = rooms.map((r) =>
+      h("button", { class: "chat-contact", type: "button", onclick: () => share(r.id) }, chatAvatar(r.title, r.peer ? r.peer.id : r.id + 7, { small: true, group: r.kind === "group", online: r.peer && r.peer.online }), h("div", { class: "grow" }, h("div", { class: "chat-contact-name" }, r.title), h("div", { class: "muted small" }, r.kind === "group" ? t("Участников: {n}", { n: r.member_count }) : (r.peer && r.peer.role_title) || "")))
+    );
+    if (people.length) items.push(h("div", { class: "chat-list-label" }, t("Сотрудники")));
+    for (const c of people) {
+      items.push(
+        contactItem(c, async () => {
+          const room = await guard(() => api("/api/chat/direct", { body: { user_id: c.id } }));
+          if (room) share(room.id);
+        })
+      );
+    }
+    list.replaceChildren(...(items.length ? items : [emptyState("message", t("Ничего не найдено"))]));
+  }
+  draw();
+  const dlg = modal({
+    title: t("Обсудить в чате"),
+    subtitle: ev.title,
+    body: h("div", { class: "stack" }, note, input({ type: "search", placeholder: t("Кому отправить"), oninput: (e) => { q = e.target.value.trim().toLowerCase(); draw(); } }), list),
+  });
+}
+
 const PAGES = {
   overview: pageOverview,
+  chat: pageChat,
   monitoring: categoryPage("monitoring", t("Мониторинг"), t("Zabbix, Prometheus, HTTP-проверки и другие системы")),
   databases: categoryPage("database", t("Базы данных"), t("MySQL, PostgreSQL, MS SQL: доступность, размер, SQL-проверки")),
   onec: categoryPage("onec", t("1С"), t("Файловые и серверные базы, журнал регистрации, целостность")),

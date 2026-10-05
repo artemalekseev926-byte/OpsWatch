@@ -13,6 +13,7 @@ flowchart LR
         HTTP[HTTP-проверки, Zabbix API]
         WH[Webhook: Zabbix, Alertmanager, любые системы]
         BUG[Баг-репорты: бот /bug, веб, API]
+        PEOPLE[Сотрудники: чат в панели и ответы из Telegram]
     end
 
     subgraph Core[Ядро OpsWatch]
@@ -23,6 +24,7 @@ flowchart LR
         ROUTE[Маршрутизация: правила, подписки, права]
         NOTI[Доставка: Telegram, входящие, ПК, шаблоны]
         MET[История метрик]
+        CHAT[Чат: комнаты, роли, доставка]
         ESC[Эскалация]
         BAK[Резервное копирование]
     end
@@ -38,6 +40,10 @@ flowchart LR
     RAS --> CON
     CON --> MET
     MET --> WEB
+    PEOPLE --> CHAT
+    CHAT --> WEB
+    CHAT --> BOT
+    CHAT --> DESK
     HTTP --> CON
     WH --> ING
     BUG --> PIPE
@@ -78,7 +84,7 @@ opswatch/
     sources.py         опрос коннекторов, статус «недоступен/доступен»
     scheduler.py       задания опроса, бэкапов, обслуживания и очистки
   connectors/          коннекторы: sql, onec, onec_log, onec_cluster (RAS/RAC), monitoring, checks
-  services/            первичная настройка, хранилище настроек, баг-репорты, перенос данных между базами
+  services/            первичная настройка, хранилище настроек, баг-репорты, чат, перенос данных между базами
   backup/              движки дампов, архивирование AES-256, доставка, ротация
   bot/                 менеджер бота и обработчики команд
   web/                 FastAPI, маршруты API, статический фронтенд
@@ -102,6 +108,9 @@ erDiagram
     SOURCE ||--o{ BACKUP_JOB : "резервируется"
     BACKUP_JOB ||--o{ BACKUP_RECORD : "запуски"
     SOURCE ||--o{ METRIC_POINT : "история"
+    CHAT_ROOM ||--o{ CHAT_MEMBER : "участники"
+    CHAT_ROOM ||--o{ CHAT_MESSAGE : "сообщения"
+    USER ||--o{ CHAT_MEMBER : "состоит"
 
     ROLE { string name string title json permissions }
     USER { string username string status bool is_superuser bigint telegram_chat_id bool notify_desktop string quiet_start string language }
@@ -112,6 +121,9 @@ erDiagram
     BACKUP_RECORD { string status string file_path string sha256 bool verified json delivery }
     NOTIFICATION { string kind string telegram_status bigint telegram_message_id bool is_read }
     METRIC_POINT { string name float value datetime ts }
+    CHAT_ROOM { string kind string title string direct_key json roles datetime last_message_at }
+    CHAT_MEMBER { bool is_admin string via_role int last_read_id bool muted }
+    CHAT_MESSAGE { string kind text text json data int event_id bool deleted }
 ```
 
 * **Категории событий**: `monitoring`, `database`, `onec`, `backup`, `bug`, `system`.
@@ -157,6 +169,14 @@ sequenceDiagram
 * **Эскалация** — правило может указать «если критичное событие не подтверждено за N минут — отправить ролям/пользователям X».
 * **Подписки** — пользователь может подписаться на категорию целиком или заглушить её (кроме критичных по правилам).
 
+## Чат
+
+* Комнаты двух видов: `direct` (один на один, уникальный ключ пары пользователей) и `group`. В группе список `roles` — роли, за которыми она следит: при подтверждении пользователя или смене его роли `ChatService.sync_user` добавляет или исключает участников, у которых в `via_role` записана роль. Добавленные вручную (`via_role` пустой) и администраторы групп не исключаются.
+* Доставка в реальном времени — долгий опрос `GET /api/chat/updates?after=&rev=`: запрос ждёт до 25 секунд нового сообщения в комнатах пользователя или изменения ревизии (участники, правки, удаления). Не нужны WebSocket и дополнительные зависимости, работает через любые прокси.
+* Статус «в сети» хранится в памяти: пользователь считается в сети 70 секунд после последнего запроса чата или опроса уведомлений.
+* Пересылка в Telegram — личные сообщения и упоминания `@логин` для тех, кто не в сети и не выключил «Сообщения чата в Telegram», не чаще раза в минуту на комнату. В тексте метка `#c<номер>`: ответ на такое сообщение в системном боте попадает в чат.
+* Системные сообщения (создание группы, добавление и исключение участников) хранятся как код и параметры и отображаются на языке читателя.
+
 ## Режимы запуска
 
 | Режим | Команда | Для чего |
@@ -175,4 +195,5 @@ sequenceDiagram
 2. **1С (готово базово)**: файловые и серверные базы, журнал регистрации (`.lgd` и `.lgp`), проверка целостности, HTTP/OData.
 3. **Мониторинг (готово базово)**: Zabbix webhook и API, Alertmanager, универсальный webhook, HTTP-проверки.
 4. **Версия 0.2 (готово)**: миграции схемы (Alembic) и хранение в PostgreSQL, мониторинг кластера 1С через RAS/RAC, графики метрик, шаблоны сообщений, английский интерфейс.
-5. **Дальше**: двухфакторный вход, LDAP/Active Directory, отчёты по SLA, мобильная версия панели.
+5. **Версия 0.3 (готово)**: чат между сотрудниками — личные сообщения, группы по ролям, обсуждение событий, ответы из Telegram.
+6. **Дальше**: вложения в чате, двухфакторный вход, LDAP/Active Directory, отчёты по SLA.

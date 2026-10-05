@@ -136,6 +136,7 @@ class DesktopAgent:
         self.token = ""
         self.enabled = False
         self.last_id = -1
+        self.chat_last_id = -1
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -152,6 +153,7 @@ class DesktopAgent:
         with self._lock:
             if token != self.token or base != self.base:
                 self.last_id = -1
+                self.chat_last_id = -1
             self.base = (base or "").rstrip("/")
             self.token = token or ""
             self.enabled = bool(enabled)
@@ -159,22 +161,26 @@ class DesktopAgent:
 
     def poll_once(self) -> list[dict]:
         with self._lock:
-            base, token, enabled, last_id = self.base, self.token, self.enabled, self.last_id
+            base, token, enabled, last_id, chat_last_id = self.base, self.token, self.enabled, self.last_id, self.chat_last_id
         if not (base and token and enabled):
             return []
         response = httpx.get(
             f"{base}/api/notifications/poll",
-            params={"after": last_id},
+            params={"after": last_id, "chat_after": chat_last_id},
             headers={"Authorization": f"Bearer {token}"},
             timeout=10,
         )
         if response.status_code != 200:
             return []
         data = response.json()
+        chat = data.get("chat") or {}
         items = (data.get("items") or []) if last_id >= 0 else []
+        if chat_last_id >= 0:
+            items += [{"title": "💬 " + (c.get("title") or APP_NAME), "body": c.get("body") or ""} for c in chat.get("items") or []]
         with self._lock:
             if token == self.token:
                 self.last_id = max(self.last_id, int(data.get("last_id") or 0), 0)
+                self.chat_last_id = max(self.chat_last_id, int(chat.get("last_id") or 0), 0)
         if not data.get("desktop"):
             return []
         return items

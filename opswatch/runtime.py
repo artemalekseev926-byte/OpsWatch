@@ -17,6 +17,7 @@ from opswatch.db import Database
 from opswatch.i18n import ts
 from opswatch.security import Crypto, LoginThrottle
 from opswatch.services.bootstrap import bootstrap
+from opswatch.services.chat import ChatService
 from opswatch.services.settings import SettingsStore
 
 log = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class Runtime:
         self.backups = BackupManager(
             self.db, self.crypto, self.settings, self.sources, self.pipeline, lambda: self.bot, config
         )
+        self.chat = ChatService(self.db, self.settings, self.crypto, lambda: self.bot)
         self.scheduler = Scheduler(self)
         self.throttle = LoginThrottle()
         self.started_at = time.time()
@@ -56,6 +58,7 @@ class Runtime:
         await self.db.create_all()
         await bootstrap(self.db, self.config.admin_username, self.config.admin_password)
         await self.settings.load()
+        await self.chat.start()
         await self.notifier.start()
         if self.start_scheduler:
             await self.scheduler.start()
@@ -70,6 +73,7 @@ class Runtime:
     async def stop(self) -> None:
         if self._bot_task is not None and not self._bot_task.done():
             self._bot_task.cancel()
+        await self.chat.stop()
         await self.bot.stop()
         await self.scheduler.stop()
         await self.notifier.stop()

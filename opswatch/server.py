@@ -8,6 +8,18 @@ from opswatch.config import AppConfig
 from opswatch.web.app import create_app
 
 
+class Server(uvicorn.Server):
+    def __init__(self, config: uvicorn.Config, app) -> None:
+        super().__init__(config)
+        self.app = app
+
+    async def shutdown(self, sockets=None) -> None:
+        runtime = getattr(self.app.state, "rt", None)
+        if runtime is not None:
+            runtime.chat.close()
+        await super().shutdown(sockets=sockets)
+
+
 def build_server(config: AppConfig, host: str | None = None, port: int | None = None) -> uvicorn.Server:
     app = create_app(config=config)
     uv_config = uvicorn.Config(
@@ -20,7 +32,7 @@ def build_server(config: AppConfig, host: str | None = None, port: int | None = 
         proxy_headers=True,
         timeout_graceful_shutdown=10,
     )
-    return uvicorn.Server(uv_config)
+    return Server(uv_config, app)
 
 
 def run_server(config: AppConfig, host: str | None = None, port: int | None = None) -> None:

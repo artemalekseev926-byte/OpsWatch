@@ -1,7 +1,7 @@
 # OpsWatch
 
-[![Windows build](https://github.com/artemalekseev926-byte/win/actions/workflows/build-windows.yml/badge.svg)](https://github.com/artemalekseev926-byte/win/actions/workflows/build-windows.yml)
-[![Tests](https://github.com/artemalekseev926-byte/win/actions/workflows/tests.yml/badge.svg)](https://github.com/artemalekseev926-byte/win/actions/workflows/tests.yml)
+[![Windows build](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/build-windows.yml/badge.svg)](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/build-windows.yml)
+[![Tests](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/tests.yml/badge.svg)](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [Русский](README.md) · **English**
@@ -19,6 +19,7 @@
 - **Notification templates** — Telegram message text for new events, repeats, escalations and resolutions, editable in the panel with a live preview.
 - **Resource monitoring** — Zabbix webhook media type, Prometheus Alertmanager, Zabbix API polling, HTTP(S) checks and a generic webhook. Problems are closed automatically on recovery.
 - **Backups** — `mysqldump`, `pg_dump`, MS SQL `BACKUP DATABASE`, 1C file infobase copy (lock check or Windows VSS shadow copy). Cron schedules, AES-256 encrypted zip, integrity verification, rotation, delivery to Telegram (split into parts, local Bot API server up to 2 GB, S3 pre-signed link or network share).
+- **Team chat** — direct messages and groups; add members by role at once (the group then follows role changes), `@login` mentions, discuss events right in the chat, instant delivery, desktop notifications, and Telegram forwarding for people who are offline with replies straight from the bot.
 - **Bug reports** — web form with screenshots, Telegram `/bug` command with a photo, HTTP API.
 - **Routing** — rules "events of type X from source Y with severity ≥ Z → roles/users N", personal subscriptions, quiet hours, deduplication and escalation of unacknowledged critical events.
 - **Telegram** — direct messages with "Acknowledge", "Resolved" and "Details" buttons; subscriptions via the bot; optional personal bot per user.
@@ -30,7 +31,7 @@
 
 ## Quick start (Windows)
 
-1. Download `OpsWatch-<version>-windows-x64.zip` from [Releases](https://github.com/artemalekseev926-byte/win/releases) or from the latest [build artifacts](https://github.com/artemalekseev926-byte/win/actions/workflows/build-windows.yml).
+1. Download `OpsWatch-<version>-windows-x64.zip` from [Releases](https://github.com/artemalekseev926-byte/OpsWatch/releases) or from the latest [build artifacts](https://github.com/artemalekseev926-byte/OpsWatch/actions/workflows/build-windows.yml).
 2. Unzip and run **`OpsWatch.exe`**.
 3. Choose **"This computer is the server"** or **"Connect to a server"**.
 4. Sign in with **`admin1` / `admin1`** and change the password in the profile.
@@ -45,7 +46,7 @@ OpsWatchServer.exe start
 ## Install from source
 
 ```bash
-pip install "git+https://github.com/artemalekseev926-byte/win.git"
+pip install "git+https://github.com/artemalekseev926-byte/OpsWatch.git"
 opswatch run
 ```
 
@@ -54,7 +55,7 @@ Open http://127.0.0.1:8765 (login `admin1`, password `admin1`).
 ### Docker
 
 ```bash
-git clone https://github.com/artemalekseev926-byte/win.git opswatch && cd opswatch
+git clone https://github.com/artemalekseev926-byte/OpsWatch.git opswatch && cd opswatch
 docker compose up -d
 ```
 
@@ -71,6 +72,21 @@ The web panel, desktop app, Windows service, bot and notifications are available
 | | |
 | --- | --- |
 | ![Sign in](docs/screenshots/en/login.png) | ![Profile](docs/screenshots/en/profile.png) |
+
+## Team chat
+
+The **Chat** tab lets employees reach each other quickly without a third-party messenger.
+
+- **Direct messages**: «Message an employee» or search by name, login or role. You see who is online and, in direct chats, whether your message was read (✓✓).
+- **Groups**: «New group» → name → roles (for example, «System administrator» and «1C administrator») — everyone with these roles joins at once. With «Follow roles» on, new employees with these roles join automatically and leave when their role changes. Individual people can be picked manually as well.
+- **Management**: group administrators rename the group, change roles, add and remove members and appoint other administrators; any member can mute or leave the group.
+- **Mentions**: `@login` is highlighted and suggested after typing `@`.
+- **Events in chat**: the «Discuss in chat» button in an event card posts it to the chosen chat; members open the event with one click.
+- **Telegram**: when someone is offline, direct messages and mentions are delivered to their Telegram (profile setting «Chat messages in Telegram»). Replying to such a message in the bot posts the reply to the OpsWatch chat.
+- **Desktop notifications**: new messages pop up in the Windows app and in the browser; the tab shows the unread counter.
+- Messages can be edited (↑ in an empty field edits the last one) and deleted. The chat can be turned off in **Settings**.
+
+![Chat](docs/screenshots/en/chat.png)
 
 ## Integrations
 

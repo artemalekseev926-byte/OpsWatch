@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opswatch"
-version = "0.2.0"
+version = "0.3.0"
 description = "Monitoring, backups and Telegram alerts for system and 1C administrators"
 readme = "README.md"
 license = "MIT"
@@ -50,7 +50,7 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23", "pillow>=10"]
 all = ["opswatch[s3,desktop,windows]"]
 
 [project.urls]
-Homepage = "https://github.com/artemalekseev926-byte/win"
+Homepage = "https://github.com/artemalekseev926-byte/OpsWatch"
 
 [project.scripts]
 opswatch = "opswatch.cli:main"

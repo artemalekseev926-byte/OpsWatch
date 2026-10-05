@@ -20,3 +20,4 @@ packaging/opswatch.png
 OpsWatch-*.zip
 .idea/
 .vscode/
+.ruff_cache/

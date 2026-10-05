@@ -43,6 +43,7 @@ def user_dict(user: User) -> dict[str, Any]:
         "quiet_start": user.quiet_start,
         "quiet_end": user.quiet_end,
         "language": user.language or "ru",
+        "chat_telegram": user.chat_telegram,
         "note": user.note,
         "created_at": iso(user.created_at),
         "last_login_at": iso(user.last_login_at),

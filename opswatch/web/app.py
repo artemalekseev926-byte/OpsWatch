@@ -13,7 +13,7 @@ from opswatch import APP_NAME, __version__
 from opswatch.config import AppConfig
 from opswatch.i18n import catalog, normalize_language, reset_request_language, set_request_language, tr
 from opswatch.runtime import Runtime
-from opswatch.web.routes import account, admin, events, sources
+from opswatch.web.routes import account, admin, chat, events, sources
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -75,7 +75,7 @@ def create_app(runtime: Runtime | None = None, config: AppConfig | None = None) 
             messages.append(f"{location}: {error.get('msg')}" if location else str(error.get("msg")))
         return JSONResponse(status_code=422, content={"detail": "; ".join(messages) or tr("Неверные данные")})
 
-    for module in (account, events, sources, admin):
+    for module in (account, events, sources, admin, chat):
         app.include_router(module.router)
     app.add_middleware(LanguageMiddleware)
 
