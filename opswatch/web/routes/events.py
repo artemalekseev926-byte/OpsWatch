@@ -253,11 +253,11 @@ async def notifications(limit: int = 30, user: User = Depends(current_user), rt=
 
 
 @router.get("/notifications/poll")
-async def poll_notifications(after: int = 0, user: User = Depends(current_user), rt=Depends(get_rt)):
+async def poll_notifications(after: int = -1, user: User = Depends(current_user), rt=Depends(get_rt)):
     async with rt.db.session() as session:
         last_id = await session.scalar(select(func.max(Notification.id)).where(Notification.user_id == user.id)) or 0
         items = []
-        if after > 0:
+        if after >= 0:
             rows = (
                 await session.execute(
                     select(Notification)

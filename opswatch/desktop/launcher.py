@@ -120,7 +120,7 @@ class DesktopAgent:
         self.base = ""
         self.token = ""
         self.enabled = False
-        self.last_id = 0
+        self.last_id = -1
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._wake = threading.Event()
@@ -136,7 +136,7 @@ class DesktopAgent:
     def set_session(self, base: str, token: str, enabled: bool) -> None:
         with self._lock:
             if token != self.token or base != self.base:
-                self.last_id = 0
+                self.last_id = -1
             self.base = (base or "").rstrip("/")
             self.token = token or ""
             self.enabled = bool(enabled)
@@ -156,10 +156,10 @@ class DesktopAgent:
         if response.status_code != 200:
             return []
         data = response.json()
-        items = (data.get("items") or []) if last_id else []
+        items = (data.get("items") or []) if last_id >= 0 else []
         with self._lock:
             if token == self.token:
-                self.last_id = max(self.last_id, int(data.get("last_id") or 0))
+                self.last_id = max(self.last_id, int(data.get("last_id") or 0), 0)
         if not data.get("desktop"):
             return []
         return items
@@ -413,49 +413,92 @@ class DesktopApp:
             self.server.stop()
 
 
+def _close_logging() -> None:
+    root = logging.getLogger()
+    for handler in list(root.handlers):
+        try:
+            handler.close()
+        finally:
+            root.removeHandler(handler)
+
+
 def selftest(args: argparse.Namespace) -> int:
+    import faulthandler
+
     from opswatch.server import ServerThread
 
     report = Path(args.report) if args.report else Path(tempfile.gettempdir()) / "opswatch-selftest.txt"
+    trace = open(report.with_suffix(".trace.txt"), "w", encoding="utf-8")
+    faulthandler.dump_traceback_later(240, exit=True, file=trace)
     lines = [f"{APP_NAME} {__version__} selftest", f"python {sys.version}", f"frozen {getattr(sys, 'frozen', False)}"]
+
+    def note(text: str) -> None:
+        lines.append(text)
+        report.write_text("\n".join(lines), encoding="utf-8")
+
     code = 1
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         port = free_port()
         config = AppConfig.load(data_dir=Path(tmp), port=port, host="127.0.0.1")
         setup_logging(config.logs_dir, "INFO", console=False)
+        note(f"data: {tmp}")
         server = ServerThread(config)
         server.start()
         base = f"http://127.0.0.1:{port}"
         try:
             if not wait_healthy(base, 120, server):
-                lines.append(f"health: FAIL {server.error!r}")
+                note(f"health: FAIL {server.error!r}")
             else:
-                lines.append("health: OK")
+                note("health: OK")
                 login = httpx.post(base + "/api/auth/login", json={"username": "admin1", "password": "admin1"}, timeout=10)
-                lines.append(f"login: {login.status_code}")
+                note(f"login: {login.status_code}")
                 headers = {"Authorization": "Bearer " + login.json()["token"]}
                 meta = httpx.get(base + "/api/meta", headers=headers, timeout=10).json()
-                lines.append("connectors: " + ",".join(c["type"] for c in meta.get("connectors", [])))
+                note("connectors: " + ",".join(c["type"] for c in meta.get("connectors", [])))
                 index = httpx.get(base + "/", timeout=10)
-                lines.append(f"index: {index.status_code} {len(index.text)}")
+                static = httpx.get(base + "/static/app.js", timeout=10)
+                note(f"index: {index.status_code} {len(index.text)}; app.js: {static.status_code}")
                 for module in ("webview", "pystray", "pymssql", "asyncpg", "aiomysql", "pyzipper"):
                     try:
                         __import__(module)
-                        lines.append(f"import {module}: OK")
+                        note(f"import {module}: OK")
                     except Exception as exc:
-                        lines.append(f"import {module}: FAIL {exc}")
-                code = 0 if login.status_code == 200 and len(meta.get("connectors", [])) >= 10 else 1
+                        note(f"import {module}: FAIL {exc}")
+                code = 0 if login.status_code == 200 and static.status_code == 200 and len(meta.get("connectors", [])) >= 10 else 1
         except Exception as exc:
-            lines.append(f"error: {exc!r}")
+            note(f"error: {exc!r}")
         finally:
             server.stop()
+            note(f"server stopped: {not server.is_alive()}")
         log_file = config.logs_dir / "opswatch.log"
+        _close_logging()
         if log_file.exists():
-            lines.append("--- log ---")
-            lines.append(log_file.read_text(encoding="utf-8", errors="replace")[-4000:])
-    lines.append(f"result: {'OK' if code == 0 else 'FAIL'}")
-    report.write_text("\n".join(lines), encoding="utf-8")
+            note("--- log ---")
+            note(log_file.read_text(encoding="utf-8", errors="replace")[-4000:])
+    note(f"result: {'OK' if code == 0 else 'FAIL'}")
+    faulthandler.cancel_dump_traceback_later()
+    trace.close()
     return code
+
+
+def crash_report(exc: BaseException, show: bool) -> None:
+    import traceback
+
+    text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+    try:
+        path = Path(tempfile.gettempdir()) / "opswatch-crash.txt"
+        path.write_text(text, encoding="utf-8")
+    except OSError:
+        path = None
+    log.error("Аварийное завершение:\n%s", text)
+    if show and sys.platform == "win32":
+        try:
+            import ctypes
+
+            message = f"OpsWatch не удалось запустить.\n\n{exc}\n\nПодробности: {path}"
+            ctypes.windll.user32.MessageBoxW(None, message, "OpsWatch", 0x10)
+        except Exception:
+            pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -475,7 +518,21 @@ def main(argv: list[str] | None = None) -> int:
     ensure_streams()
     args, _unknown = build_parser().parse_known_args(argv)
     if args.selftest:
-        return selftest(args)
+        try:
+            return selftest(args)
+        except BaseException as exc:
+            crash_report(exc, show=False)
+            return 1
+    try:
+        return run_desktop(args)
+    except SystemExit:
+        raise
+    except BaseException as exc:
+        crash_report(exc, show=True)
+        return 1
+
+
+def run_desktop(args: argparse.Namespace) -> int:
     if args.reset:
         config = AppConfig.load(**({"data_dir": Path(args.data_dir)} if args.data_dir else {}))
         prefs_path(config).unlink(missing_ok=True)

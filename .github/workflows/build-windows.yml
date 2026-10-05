@@ -44,15 +44,43 @@ jobs:
       - name: Build executables
         run: pyinstaller --noconfirm --clean --distpath dist --workpath build packaging/opswatch.spec
 
-      - name: Self-test OpsWatch.exe
+      - name: Self-test OpsWatchServer.exe
+        timeout-minutes: 8
         shell: pwsh
         run: |
-          $report = Join-Path $env:RUNNER_TEMP "selftest.txt"
-          $p = Start-Process -FilePath "dist\OpsWatch\OpsWatch.exe" -ArgumentList "--selftest","--report",$report -Wait -PassThru
-          Get-Content $report
+          $report = Join-Path $env:RUNNER_TEMP "selftest-server.txt"
+          $out = Join-Path $env:RUNNER_TEMP "selftest-server.out"
+          $err = Join-Path $env:RUNNER_TEMP "selftest-server.err"
+          $p = Start-Process -FilePath "dist\OpsWatch\OpsWatchServer.exe" -ArgumentList "selftest","--report",$report -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+          $null = $p.Handle
+          $finished = $p.WaitForExit(300000)
+          if (-not $finished) { Stop-Process -Id $p.Id -Force }
+          foreach ($f in @($out, $err, $report, ($report -replace '\.txt$', '.trace.txt'))) {
+            if (Test-Path $f) { Write-Host "===== $f"; Get-Content $f }
+          }
+          if (-not $finished) { throw "selftest timed out" }
+          if ($p.ExitCode -ne 0) { throw "selftest failed with code $($p.ExitCode)" }
+
+      - name: Self-test OpsWatch.exe
+        timeout-minutes: 8
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "selftest-desktop.txt"
+          $p = Start-Process -FilePath "dist\OpsWatch\OpsWatch.exe" -ArgumentList "--selftest","--report",$report -PassThru
+          $null = $p.Handle
+          $finished = $p.WaitForExit(300000)
+          if (-not $finished) {
+            Get-Process -Id $p.Id -ErrorAction SilentlyContinue | Select-Object Id, MainWindowTitle | Format-List
+            Stop-Process -Id $p.Id -Force
+          }
+          foreach ($f in @($report, ($report -replace '\.txt$', '.trace.txt'), (Join-Path $env:TEMP "opswatch-crash.txt"))) {
+            if (Test-Path $f) { Write-Host "===== $f"; Get-Content $f }
+          }
+          if (-not $finished) { throw "selftest timed out" }
           if ($p.ExitCode -ne 0) { throw "selftest failed with code $($p.ExitCode)" }
 
       - name: Test Windows service
+        timeout-minutes: 8
         shell: pwsh
         run: |
           $exe = "dist\OpsWatch\OpsWatchServer.exe"

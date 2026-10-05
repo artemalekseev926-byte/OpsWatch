@@ -7,7 +7,7 @@ const S = {
   route: "overview",
   unread: 0,
   open: {},
-  lastNotif: 0,
+  lastNotif: -1,
   pollTimer: null,
   refreshTimer: null,
   refresh: null,
@@ -589,8 +589,8 @@ async function poll() {
   } catch (e) {
     return;
   }
-  const isNew = S.lastNotif > 0;
-  S.lastNotif = data.last_id || S.lastNotif;
+  const isNew = S.lastNotif >= 0;
+  S.lastNotif = Math.max(data.last_id || 0, S.lastNotif, 0);
   S.unread = data.unread || 0;
   S.open = data.open || {};
   updateBadges();
@@ -627,7 +627,7 @@ function syncBridge() {
 function logoutLocal() {
   S.token = "";
   S.me = null;
-  S.lastNotif = 0;
+  S.lastNotif = -1;
   store("ow_token", "");
   syncBridge();
   render();

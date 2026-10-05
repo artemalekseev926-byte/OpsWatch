@@ -30,6 +30,15 @@ def safe_name(value: str) -> str:
     return cleaned[:60] or "backup"
 
 
+def unique_path(path: Path) -> Path:
+    candidate = path
+    index = 2
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+        index += 1
+    return candidate
+
+
 class BackupManager:
     def __init__(self, db, crypto, settings, sources, pipeline, bot_provider, config) -> None:
         self.db = db
@@ -111,7 +120,7 @@ class BackupManager:
             workdir.mkdir(parents=True, exist_ok=True)
             files = await engine_cls(connector, options, self.settings).dump(workdir)
             job_dir = self.root() / f"{job_id}_{safe_name(job_name)}"
-            archive = job_dir / f"{safe_name(job_name)}_{datetime.now():%Y%m%d_%H%M%S}.zip"
+            archive = unique_path(job_dir / f"{safe_name(job_name)}_{datetime.now():%Y%m%d_%H%M%S}.zip")
             await asyncio.to_thread(make_archive, files, archive, password, workdir)
             count = await asyncio.to_thread(verify_archive, archive, password)
             digest = await asyncio.to_thread(sha256_file, archive)
