@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "opswatch"
-version = "0.1.0"
+version = "0.2.0"
 description = "Monitoring, backups and Telegram alerts for system and 1C administrators"
 readme = "README.md"
 license = "MIT"

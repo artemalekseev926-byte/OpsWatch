@@ -143,4 +143,8 @@ jobs:
           files: OpsWatch-*.zip
           body: |
             Скачайте OpsWatch-${{ steps.meta.outputs.version }}-windows-x64.zip, распакуйте и запустите OpsWatch.exe.
-            Вход по умолчанию: admin1 / admin1.
+            Вход по умолчанию: admin1 / admin1. Обновление: распакуйте поверх предыдущей версии — данные и настройки сохранятся.
+            Что нового: https://github.com/${{ github.repository }}/blob/${{ github.sha }}/CHANGELOG.md
+
+            Download OpsWatch-${{ steps.meta.outputs.version }}-windows-x64.zip, unzip it and run OpsWatch.exe.
+            Default login: admin1 / admin1. The interface is available in Russian and English.

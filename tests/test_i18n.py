@@ -133,3 +133,11 @@ async def test_default_admin_follows_system_language(tmp_path, monkeypatch):
     finally:
         await runtime.stop()
         set_default_language("ru")
+
+
+def test_language_from_env_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("OPSWATCH_LANGUAGE", raising=False)
+    monkeypatch.setenv("LANG", "ru_RU.UTF-8")
+    config = AppConfig(data_dir=tmp_path / "data", plugins_dir=tmp_path / "plugins", language="en")
+    config.prepare()
+    assert system_language() == "en"

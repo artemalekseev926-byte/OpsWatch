@@ -39,6 +39,35 @@ Telegram
 Настройки запуска можно задать в файле .env (образец — .env.example).
 Порт по умолчанию 8765 — разрешите его в брандмауэре Windows для доступа из сети.
 
+Обновление и PostgreSQL
+-----------------------
+Новую версию распакуйте поверх старой — папка data и файл .env сохранятся,
+схема базы обновится автоматически при запуске.
+Перенести данные из SQLite в PostgreSQL (сервер должен быть остановлен):
+  OpsWatchServer.exe migrate-db postgresql://user:password@host/opswatch --write-env
+
+Язык
+----
+Интерфейс и уведомления — на русском и английском: переключатель на экране входа
+и в профиле. Язык по умолчанию задаётся в .env: OPSWATCH_LANGUAGE=ru или en.
+
 Примеры интеграций — в папке examples. Собственные коннекторы — в папке plugins.
 
 Лицензия MIT.
+
+
+OpsWatch — monitoring, backups and Telegram notifications
+==========================================================
+
+1. Unzip the archive to any folder (for example, C:\OpsWatch) and run OpsWatch.exe.
+2. Choose "This computer is the server" or "Connect to a server".
+3. Sign in with admin1 / admin1 and change the password in the profile.
+4. Switch the language to English on the sign-in screen or in the profile.
+
+Windows service (elevated command prompt in the program folder):
+  OpsWatchServer.exe install
+  OpsWatchServer.exe start
+
+All data is kept in the data folder next to the program; keep data\secret.key safe.
+Move data to PostgreSQL: OpsWatchServer.exe migrate-db postgresql://user:password@host/opswatch --write-env
+Set the default language in .env: OPSWATCH_LANGUAGE=en

@@ -2128,7 +2128,7 @@ async function pageSettings(root) {
         "div",
         null,
         h("div", { class: "grid-2" }, field(t("Группировать одинаковые события, мин"), input({ type: "number", min: 0, value: v.group_window_min, oninput: (e) => (v.group_window_min = Number(e.target.value)) }), t("Повторное уведомление не чаще этого интервала")), field(t("Хранить историю, дней"), input({ type: "number", min: 1, value: v.event_retention_days, oninput: (e) => (v.event_retention_days = Number(e.target.value)) }))),
-        h("div", { class: "grid-2" }, field(t("Язык системных событий"), select(Object.entries(LANGS), v.language || "ru", { onchange: (e) => (v.language = e.target.value) }), t("На этом языке создаются тексты событий от источников, бэкапов и системы"))),
+        h("div", { class: "grid-2" }, field(t("Язык системных событий"), select(Object.entries(LANGS), v.language || "ru", { onchange: (e) => (v.language = e.target.value) }), t("На этом языке создаются тексты событий от источников, бэкапов и системы")), field(t("Хранить историю графиков, дней"), input({ type: "number", min: 1, value: v.metric_retention_days, oninput: (e) => (v.metric_retention_days = Number(e.target.value)) }))),
         checkbox(t("Разрешить регистрацию новых пользователей"), v.registration_enabled, (x) => (v.registration_enabled = x))
       )
     )

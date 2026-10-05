@@ -7,6 +7,8 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from opswatch.i18n import normalize_language
+
 
 def app_dir() -> Path:
     if getattr(sys, "frozen", False):
@@ -56,6 +58,7 @@ class AppConfig(BaseSettings):
     admin_username: str = "admin1"
     admin_password: str = "admin1"
     log_level: str = "INFO"
+    language: str | None = None
     plugins_dir: Path | None = None
 
     @classmethod
@@ -82,6 +85,8 @@ class AppConfig(BaseSettings):
             self.secret_key = self._load_or_create_key()
         if self.plugins_dir is None:
             self.plugins_dir = app_dir() / "plugins"
+        if self.language and normalize_language(self.language):
+            os.environ.setdefault("OPSWATCH_LANGUAGE", normalize_language(self.language))
 
     def _load_or_create_key(self) -> str:
         key_file = self.data_dir / "secret.key"
