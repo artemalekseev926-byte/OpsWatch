@@ -80,6 +80,60 @@ def cmd_reset_password(args) -> int:
     return 1
 
 
+def write_env_value(path: Path, key: str, value: str) -> None:
+    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    updated = False
+    for index, line in enumerate(lines):
+        if line.split("=", 1)[0].strip() == key:
+            lines[index] = f"{key}={value}"
+            updated = True
+    if not updated:
+        lines.append(f"{key}={value}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def cmd_migrate_db(args) -> int:
+    from opswatch.services.transfer import TransferError, describe_url, transfer
+
+    config = _config(args)
+    source = args.source or config.database_url
+    print(f"Перенос данных: {describe_url(source)} → {describe_url(args.target)}")
+    try:
+        counts = asyncio.run(transfer(source, args.target, force=args.force, progress=lambda m: print("  " + m)))
+    except TransferError as exc:
+        print(f"Ошибка: {exc}")
+        return 1
+    except Exception as exc:
+        print(f"Ошибка подключения: {exc}")
+        return 1
+    print(f"Готово, перенесено записей: {sum(counts.values())}")
+    env_path = Path(args.env) if args.env else app_dir() / ".env"
+    if args.write_env:
+        write_env_value(env_path, "OPSWATCH_DATABASE_URL", args.target)
+        print(f"Адрес базы записан в {env_path}. Перезапустите OpsWatch.")
+    else:
+        print(f"Чтобы OpsWatch начал работать с новой базой, добавьте в {env_path}:")
+        print(f"OPSWATCH_DATABASE_URL={args.target}")
+    print("Сохраните файл data/secret.key — без него зашифрованные пароли не расшифровать.")
+    return 0
+
+
+def cmd_upgrade_db(args) -> int:
+    from opswatch.db import Database
+
+    config = _config(args)
+
+    async def run() -> str | None:
+        db = Database(config.database_url)
+        try:
+            return await db.migrate()
+        finally:
+            await db.dispose()
+
+    print(f"Схема базы: {asyncio.run(run())}")
+    return 0
+
+
 def cmd_desktop(args) -> int:
     from opswatch.desktop.launcher import main as desktop_main
 
@@ -109,6 +163,20 @@ def build_parser() -> argparse.ArgumentParser:
     reset.add_argument("--env")
     reset.add_argument("--data-dir")
     reset.set_defaults(func=cmd_reset_password)
+
+    migrate = sub.add_parser("migrate-db", help="Перенести данные в другую базу (например, из SQLite в PostgreSQL)")
+    migrate.add_argument("target", help="postgresql://user:password@host:5432/opswatch")
+    migrate.add_argument("--source", help="Исходная база (по умолчанию текущая)")
+    migrate.add_argument("--force", action="store_true", help="Перезаписать данные в целевой базе")
+    migrate.add_argument("--write-env", action="store_true", help="Записать адрес новой базы в .env")
+    migrate.add_argument("--env")
+    migrate.add_argument("--data-dir")
+    migrate.set_defaults(func=cmd_migrate_db)
+
+    upgrade_db = sub.add_parser("upgrade-db", help="Обновить схему базы до последней версии")
+    upgrade_db.add_argument("--env")
+    upgrade_db.add_argument("--data-dir")
+    upgrade_db.set_defaults(func=cmd_upgrade_db)
 
     desktop = sub.add_parser("desktop", help="Запустить настольное приложение")
     desktop.add_argument("rest", nargs=argparse.REMAINDER)

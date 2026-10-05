@@ -14,6 +14,7 @@ from opswatch.constants import CATEGORIES, PERMISSIONS, SEVERITIES
 from opswatch.core.scheduler import next_cron_run, validate_cron
 from opswatch.models import AuthSession, BackupJob, BackupRecord, Role, Rule, Source, Subscription, User
 from opswatch.security import hash_password
+from opswatch.services.transfer import describe_url
 from opswatch.web.deps import get_rt, require
 from opswatch.web.serializers import job_dict, record_dict, role_dict, rule_dict, user_dict
 
@@ -401,6 +402,8 @@ async def get_settings(request: Request, user: User = Depends(require("settings.
         "base_url": (rt.settings.get("public_url") or str(request.base_url)).rstrip("/"),
         "data_dir": str(rt.config.data_dir),
         "backup_dir": str(rt.backups.root()),
+        "database": describe_url(rt.config.database_url),
+        "database_dialect": rt.db.dialect,
     }
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from opswatch.db import Base, utcnow
@@ -42,6 +42,7 @@ class User(Base):
     quiet_start: Mapped[str] = mapped_column(String(5), default="")
     quiet_end: Mapped[str] = mapped_column(String(5), default="")
     note: Mapped[str] = mapped_column(Text, default="")
+    language: Mapped[str] = mapped_column(String(8), default="ru", server_default="ru")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -216,3 +217,14 @@ class BackupRecord(Base):
     delivery: Mapped[dict] = mapped_column(JSON, default=dict)
     error: Mapped[str] = mapped_column(Text, default="")
     deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class MetricPoint(Base):
+    __tablename__ = "metric_points"
+    __table_args__ = (Index("ix_metric_points_series", "source_id", "name", "ts"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(64))
+    value: Mapped[float] = mapped_column(Float)
+    ts: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

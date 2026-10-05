@@ -1845,7 +1845,24 @@ async function pageSettings(root) {
       )
     )
   );
-  root.append(h("div", { class: "muted small", style: "margin-top:12px" }, "Каталог данных: ", h("code", null, data.data_dir)));
+  root.append(
+    panel(
+      "Хранилище",
+      null,
+      h(
+        "div",
+        { class: "kv" },
+        h("div", { class: "k" }, "База данных"),
+        h("div", null, h("code", null, data.database)),
+        h("div", { class: "k" }, "Каталог данных"),
+        h("div", null, h("code", null, data.data_dir))
+      ),
+      false
+    )
+  );
+  if (data.database_dialect === "sqlite") {
+    root.append(h("div", { class: "notice", style: "margin-top:12px" }, icon("database"), h("div", null, "Для большой нагрузки можно перенести данные в PostgreSQL: ", h("code", null, "OpsWatchServer.exe migrate-db postgresql://user:pass@host/opswatch --write-env"), ", затем перезапустить программу.")));
+  }
 }
 
 async function pageProfile(root) {

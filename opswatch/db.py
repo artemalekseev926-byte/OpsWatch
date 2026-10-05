@@ -48,10 +48,17 @@ class Database:
         self.sessionmaker = async_sessionmaker(self.engine, expire_on_commit=False)
 
     async def create_all(self) -> None:
-        from opswatch import models
+        await self.migrate()
+
+    async def migrate(self) -> str | None:
+        from opswatch.migrator import upgrade
 
         async with self.engine.begin() as connection:
-            await connection.run_sync(models.Base.metadata.create_all)
+            return await connection.run_sync(upgrade)
+
+    @property
+    def dialect(self) -> str:
+        return self.engine.dialect.name
 
     def session(self) -> AsyncSession:
         return self.sessionmaker()

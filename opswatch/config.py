@@ -32,6 +32,16 @@ def _fallback_data_dir() -> Path:
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "opswatch"
 
 
+def normalize_database_url(url: str) -> str:
+    url = (url or "").strip()
+    for prefix in ("postgresql://", "postgres://", "postgresql+psycopg2://", "postgresql+psycopg://"):
+        if url.startswith(prefix):
+            return "postgresql+asyncpg://" + url[len(prefix):]
+    if url.startswith("sqlite:///"):
+        return "sqlite+aiosqlite:///" + url[len("sqlite:///"):]
+    return url
+
+
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="OPSWATCH_", extra="ignore")
 
@@ -67,6 +77,7 @@ class AppConfig(BaseSettings):
             folder.mkdir(parents=True, exist_ok=True)
         if not self.database_url:
             self.database_url = f"sqlite+aiosqlite:///{(self.data_dir / 'opswatch.db').as_posix()}"
+        self.database_url = normalize_database_url(self.database_url)
         if not self.secret_key:
             self.secret_key = self._load_or_create_key()
         if self.plugins_dir is None:

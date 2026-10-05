@@ -39,6 +39,7 @@ dependencies = [
     "asyncpg>=0.29",
     "pymssql>=2.3",
     "tzlocal>=5",
+    "alembic>=1.13",
 ]
 
 [project.optional-dependencies]
@@ -58,7 +59,7 @@ opswatch = "opswatch.cli:main"
 include = ["opswatch*"]
 
 [tool.setuptools.package-data]
-opswatch = ["web/static/*"]
+opswatch = ["web/static/*", "locales/*.json", "migrations/*.mako", "migrations/versions/*.py"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

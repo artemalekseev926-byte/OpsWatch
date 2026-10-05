@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import httpx
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from opswatch.config import AppConfig
 from opswatch.models import User
@@ -54,9 +57,24 @@ class FakeBot:
         return 4000 + len(self.files)
 
 
+TEST_DATABASE_URL = os.environ.get("OPSWATCH_TEST_DATABASE_URL", "")
+
+
+async def reset_database(url: str) -> None:
+    engine = create_async_engine(url)
+    async with engine.begin() as connection:
+        if connection.dialect.name == "postgresql":
+            await connection.execute(text("DROP SCHEMA public CASCADE"))
+            await connection.execute(text("CREATE SCHEMA public"))
+    await engine.dispose()
+
+
 @pytest.fixture
 async def rt(tmp_path):
     config = AppConfig(data_dir=tmp_path / "data", plugins_dir=tmp_path / "plugins")
+    if TEST_DATABASE_URL:
+        await reset_database(TEST_DATABASE_URL)
+        config.database_url = TEST_DATABASE_URL
     config.prepare()
     runtime = Runtime(config, start_bot=False, start_scheduler=False)
     runtime.bot = FakeBot()

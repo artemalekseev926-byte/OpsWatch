@@ -6,8 +6,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy
 ROOT = Path(SPECPATH).resolve().parent
 ICON = str(Path(SPECPATH) / "opswatch.ico")
 
-hiddenimports = []
-for package in ("opswatch", "uvicorn", "aiogram", "apscheduler", "pyzipper"):
+hiddenimports = collect_submodules("opswatch", filter=lambda name: not name.startswith("opswatch.migrations"))
+for package in ("uvicorn", "aiogram", "apscheduler", "pyzipper", "alembic"):
     hiddenimports += collect_submodules(package)
 hiddenimports += [
     "aiosqlite",
@@ -28,8 +28,12 @@ hiddenimports += [
 if sys.platform == "win32":
     hiddenimports += ["pystray._win32", "win32timezone", "win32serviceutil", "win32service", "win32event", "servicemanager", "pywintypes"]
 
-datas = collect_data_files("opswatch", includes=["web/static/*"])
-for dist in ("apscheduler", "aiogram", "fastapi", "starlette", "pydantic", "uvicorn", "sqlalchemy", "httpx", "pywebview", "pystray", "tzlocal"):
+datas = collect_data_files(
+    "opswatch",
+    includes=["web/static/*", "locales/*.json", "migrations/*.py", "migrations/*.mako", "migrations/versions/*.py"],
+    include_py_files=True,
+)
+for dist in ("alembic", "apscheduler", "aiogram", "fastapi", "starlette", "pydantic", "uvicorn", "sqlalchemy", "httpx", "pywebview", "pystray", "tzlocal"):
     try:
         datas += copy_metadata(dist)
     except Exception:

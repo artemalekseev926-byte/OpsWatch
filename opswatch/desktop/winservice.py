@@ -22,6 +22,10 @@ USAGE = f"""{APP_NAME} {__version__} — сервер
   OpsWatchServer.exe status     состояние службы
   OpsWatchServer.exe remove     удалить службу
 
+  OpsWatchServer.exe migrate-db postgresql://user:pass@host/opswatch --write-env
+                                перенести данные из SQLite в PostgreSQL
+  OpsWatchServer.exe reset-password admin1 НовыйПароль
+
 Команды службы выполняйте от имени администратора.
 Веб-панель: http://<адрес-компьютера>:8765 (логин admin1 / пароль admin1)
 """
@@ -141,6 +145,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if command == "run":
         return run_console()
+    if command in {"migrate-db", "upgrade-db", "reset-password"}:
+        from opswatch.cli import main as cli_main
+
+        return cli_main(argv)
     if command == "selftest":
         from opswatch.desktop.launcher import main as desktop_main
 
