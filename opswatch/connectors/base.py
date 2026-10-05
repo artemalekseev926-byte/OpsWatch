@@ -148,6 +148,15 @@ class Connector:
             resolve=True,
         )
 
+    def track(self, state: dict[str, Any], key: str, active: dict[str, EventIn]) -> tuple[list[EventIn], dict[str, Any]]:
+        previous = set(state.get(key) or [])
+        events = list(active.values())
+        for fingerprint in sorted(previous - set(active)):
+            events.append(self.resolved(fingerprint))
+        new_state = dict(state)
+        new_state[key] = sorted(active)
+        return events, new_state
+
     async def poll(self) -> PollResult:
         return PollResult()
 

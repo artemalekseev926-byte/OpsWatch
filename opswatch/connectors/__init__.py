@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 BUILTIN_MODULES = (
     "opswatch.connectors.sql",
     "opswatch.connectors.onec",
+    "opswatch.connectors.onec_cluster",
     "opswatch.connectors.monitoring",
 )
 
