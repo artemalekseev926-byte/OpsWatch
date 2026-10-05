@@ -11,7 +11,9 @@ from sqlalchemy import delete, select
 
 from opswatch.connectors import get_connector_class
 from opswatch.constants import CATEGORIES, PERMISSIONS, SEVERITIES
+from opswatch.core.render import PLACEHOLDERS, TEMPLATE_KINDS, default_template, render_notification, sample_event, validate_template
 from opswatch.core.scheduler import next_cron_run, validate_cron
+from opswatch.i18n import LANGUAGES
 from opswatch.models import AuthSession, BackupJob, BackupRecord, Role, Rule, Source, Subscription, User
 from opswatch.security import hash_password
 from opswatch.services.transfer import describe_url
@@ -413,6 +415,91 @@ async def put_settings(data: dict[str, Any], request: Request, user: User = Depe
     if {"telegram_token", "telegram_api_url"} & set(changed):
         await rt.restart_bot()
     return await get_settings(request, user, rt)
+
+
+class TemplateIn(BaseModel):
+    lang: str = "ru"
+    kind: str = "event"
+    value: str = ""
+
+
+def _check_template(data: TemplateIn) -> None:
+    if data.lang not in LANGUAGES or data.kind not in TEMPLATE_KINDS:
+        raise HTTPException(422, "Неизвестный язык или вид шаблона")
+
+
+def _preview(data: TemplateIn, user: User) -> str:
+    event = sample_event()
+    if data.kind == "resolved":
+        event.status = "resolved"
+    return render_notification(
+        event,
+        data.kind,
+        "",
+        user.full_name or user.username,
+        data.lang,
+        data.value,
+        "",
+    )
+
+
+@router.get("/settings/templates")
+async def get_templates(user: User = Depends(require("settings.manage")), rt=Depends(get_rt)):
+    templates = {}
+    for lang in LANGUAGES:
+        templates[lang] = {}
+        for kind in TEMPLATE_KINDS:
+            value = rt.settings.get(f"template_{kind}_{lang}") or ""
+            templates[lang][kind] = {"value": value, "default": default_template(kind, lang), "custom": bool(value)}
+    return {
+        "languages": list(LANGUAGES),
+        "kinds": list(TEMPLATE_KINDS),
+        "placeholders": [{"name": k, "title": v} for k, v in PLACEHOLDERS.items()],
+        "templates": templates,
+    }
+
+
+@router.put("/settings/templates")
+async def put_template(data: TemplateIn, user: User = Depends(require("settings.manage")), rt=Depends(get_rt)):
+    _check_template(data)
+    value = data.value.strip()
+    if value == default_template(data.kind, data.lang):
+        value = ""
+    if value:
+        problems = validate_template(value)
+        if problems:
+            raise HTTPException(422, "; ".join(problems))
+    await rt.settings.update({f"template_{data.kind}_{data.lang}": value})
+    return await get_templates(user, rt)
+
+
+@router.post("/settings/templates/preview")
+async def preview_template(data: TemplateIn, user: User = Depends(require("settings.manage"))):
+    _check_template(data)
+    problems = validate_template(data.value) if data.value.strip() else []
+    return {"text": _preview(data, user), "problems": problems}
+
+
+@router.post("/settings/templates/test")
+async def test_template(data: TemplateIn, user: User = Depends(require("settings.manage")), rt=Depends(get_rt)):
+    _check_template(data)
+    problems = validate_template(data.value) if data.value.strip() else []
+    if problems:
+        raise HTTPException(422, "; ".join(problems))
+    text = _preview(data, user)
+    personal = rt.crypto.decrypt(user.personal_bot_token or "")
+    try:
+        if personal and user.personal_chat_id:
+            await rt.bot.send_text(user.personal_chat_id, text, personal)
+        elif user.telegram_chat_id and rt.bot.available:
+            await rt.bot.send_text(user.telegram_chat_id, text)
+        else:
+            raise HTTPException(400, "Telegram не привязан или бот не запущен")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Telegram: {exc}") from exc
+    return {"ok": True}
 
 
 @router.post("/settings/telegram/restart")

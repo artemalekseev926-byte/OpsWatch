@@ -2028,6 +2028,7 @@ async function pageSettings(root) {
   const save = async () => {
     const payload = Object.assign({}, v);
     delete payload.env_locked;
+    for (const key of Object.keys(payload)) if (key.startsWith("template_")) delete payload[key];
     const r = await guard(() => api("/api/settings", { method: "PUT", body: payload }), "Настройки сохранены");
     if (r) {
       S.meta = await api("/api/meta");
@@ -2085,6 +2086,7 @@ async function pageSettings(root) {
       )
     )
   );
+  root.append(await templatesPanel());
   root.append(
     panel(
       "Хранилище",
@@ -2103,6 +2105,123 @@ async function pageSettings(root) {
   if (data.database_dialect === "sqlite") {
     root.append(h("div", { class: "notice", style: "margin-top:12px" }, icon("database"), h("div", null, "Для большой нагрузки можно перенести данные в PostgreSQL: ", h("code", null, "OpsWatchServer.exe migrate-db postgresql://user:pass@host/opswatch --write-env"), ", затем перезапустить программу.")));
   }
+}
+
+const TEMPLATE_KIND_TITLES = { event: "Новое событие", repeat: "Повтор", escalation: "Эскалация", resolved: "Решено" };
+
+function telegramHtml(text) {
+  const doc = new DOMParser().parseFromString(`<div>${text}</div>`, "text/html");
+  const allowed = { b: "b", strong: "b", i: "i", em: "i", u: "u", ins: "u", s: "s", strike: "s", del: "s", code: "code", pre: "pre", a: "a", blockquote: "blockquote", "tg-spoiler": "span" };
+  const walk = (node) => {
+    const out = [];
+    node.childNodes.forEach((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        out.push(document.createTextNode(child.textContent));
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        const tag = allowed[child.tagName.toLowerCase()];
+        const kids = walk(child);
+        if (tag) {
+          const el = document.createElement(tag);
+          if (tag === "a") {
+            const href = child.getAttribute("href") || "";
+            if (/^https?:/i.test(href)) {
+              el.href = href;
+              el.target = "_blank";
+              el.rel = "noopener";
+            }
+          }
+          el.append(...kids);
+          out.push(el);
+        } else {
+          out.push(...kids);
+        }
+      }
+    });
+    return out;
+  };
+  const box = h("div", { class: "tg-text" });
+  box.append(...walk(doc.body.firstChild || doc.body));
+  return box;
+}
+
+async function templatesPanel() {
+  const data = await api("/api/settings/templates");
+  const st = { lang: "ru", kind: "event" };
+  const langChips = h("div", { class: "chips" });
+  const kindChips = h("div", { class: "chips" });
+  const textarea = h("textarea", { class: "code", style: "min-height:190px" });
+  const preview = h("div", { class: "tg-bubble" });
+  const problems = h("div");
+  const badge = h("span");
+  const placeholders = h(
+    "div",
+    { class: "chips" },
+    data.placeholders.map((p) =>
+      h("button", {
+        class: "chip mono",
+        title: p.title,
+        type: "button",
+        onclick: () => {
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          textarea.setRangeText("{" + p.name + "}", start, end, "end");
+          textarea.focus();
+          schedule();
+        },
+      }, "{" + p.name + "}")
+    )
+  );
+  let timer;
+  const schedule = () => {
+    clearTimeout(timer);
+    timer = setTimeout(refresh, 300);
+  };
+  textarea.addEventListener("input", schedule);
+  async function refresh() {
+    const r = await api("/api/settings/templates/preview", { body: { lang: st.lang, kind: st.kind, value: textarea.value } }).catch((e) => ({ text: "", problems: [e.message] }));
+    const buttons = st.kind === "resolved" ? null : h("div", { class: "tg-buttons" }, ["👌 Принял", "✅ Решено", "ℹ️ Подробнее"].map((b) => h("span", null, b)));
+    preview.replaceChildren(telegramHtml(r.text), buttons || "");
+    problems.replaceChildren(...(r.problems || []).map((p) => h("div", { class: "notice critical", style: "margin:8px 0 0" }, icon("alert"), h("div", null, p))));
+  }
+  function draw() {
+    langChips.replaceChildren(...data.languages.map((l) => h("button", { class: "chip" + (st.lang === l ? " active" : ""), onclick: () => { st.lang = l; draw(); } }, l === "ru" ? "Русский" : "English")));
+    kindChips.replaceChildren(...data.kinds.map((k) => h("button", { class: "chip" + (st.kind === k ? " active" : ""), onclick: () => { st.kind = k; draw(); } }, TEMPLATE_KIND_TITLES[k] || k)));
+    const item = data.templates[st.lang][st.kind];
+    textarea.value = item.value || item.default;
+    badge.replaceChildren(item.custom ? h("span", { class: "badge accent" }, "Свой шаблон") : h("span", { class: "badge" }, "Стандартный"));
+    refresh();
+  }
+  const save = async (value) => {
+    const r = await guard(() => api("/api/settings/templates", { method: "PUT", body: { lang: st.lang, kind: st.kind, value } }), "Шаблон сохранён");
+    if (r) {
+      data.templates = r.templates;
+      draw();
+    }
+  };
+  draw();
+  return panel(
+    "Шаблоны уведомлений",
+    badge,
+    h(
+      "div",
+      { class: "stack" },
+      h("p", { class: "muted small", style: "margin:0" }, "Текст сообщений в Telegram. Можно использовать теги <b>, <i>, <code>, <a href> и подстановки. Строка, где все подстановки пустые, скрывается."),
+      h("div", { class: "row" }, langChips, h("span", { class: "tab-sep", style: "height:22px" }), kindChips),
+      h(
+        "div",
+        { class: "grid-2", style: "align-items:start" },
+        h("div", { class: "stack", style: "gap:8px" }, textarea, placeholders),
+        h("div", null, h("div", { class: "label", style: "margin-bottom:6px" }, "Предпросмотр"), preview, problems)
+      ),
+      h(
+        "div",
+        { class: "row" },
+        h("button", { class: "btn primary", onclick: () => save(textarea.value) }, "Сохранить шаблон"),
+        h("button", { class: "btn", onclick: () => save("") }, "Вернуть стандартный"),
+        h("button", { class: "btn", onclick: () => guard(() => api("/api/settings/templates/test", { body: { lang: st.lang, kind: st.kind, value: textarea.value } }), "Тестовое сообщение отправлено") }, icon("send"), "Отправить себе")
+      )
+    )
+  );
 }
 
 async function pageProfile(root) {

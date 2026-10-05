@@ -5,7 +5,7 @@ import logging
 
 from sqlalchemy import select
 
-from opswatch.core.render import event_keyboard, link_keyboard, render_event, render_resolved
+from opswatch.core.render import event_keyboard, link_keyboard, render_notification
 from opswatch.core.router import in_quiet_hours
 from opswatch.db import Database
 from opswatch.models import Event, Notification, User
@@ -66,6 +66,19 @@ class Notifier:
         elif action == "update":
             await self._update(item_id)
 
+    def render(
+        self,
+        event: Event,
+        kind: str,
+        acked: str,
+        resolved: str,
+        lang: str,
+        public_url: str,
+        use_custom: bool = True,
+    ) -> str:
+        template = self.settings.get(f"template_{kind}_{lang}") if use_custom else ""
+        return render_notification(event, kind, acked, resolved, lang, template or "", public_url)
+
     async def _names(self, session, event: Event) -> tuple[str, str]:
         acked = resolved = ""
         if event.acked_by_id:
@@ -99,12 +112,11 @@ class Notifier:
                 await session.commit()
                 return
             acked, resolved = await self._names(session, event)
-            if notification.kind == "resolved":
-                text = render_resolved(event, resolved)
-                keyboard = []
-            else:
-                text = render_event(event, notification.kind, acked, resolved)
-                keyboard = event_keyboard(event)
+            lang = user.language or "ru"
+            public_url = self.settings.get("public_url") or ""
+            text = self.render(event, notification.kind, acked, resolved, lang, public_url)
+            fallback = self.render(event, notification.kind, acked, resolved, lang, public_url, use_custom=False)
+            keyboard = [] if notification.kind == "resolved" else event_keyboard(event, lang)
             silent = in_quiet_hours(user) and notification.severity != "critical"
             reply_to = None
             chat_id = user.personal_chat_id if use_personal else user.telegram_chat_id
@@ -121,19 +133,26 @@ class Notifier:
                     .order_by(Notification.id)
                     .limit(1)
                 )
-            try:
+            async def deliver(body: str) -> int:
                 if use_personal:
-                    public_url = self.settings.get("public_url")
-                    message_id = await bot.send_personal(
+                    return await bot.send_personal(
                         personal_token,
                         chat_id,
-                        text,
-                        keyboard=link_keyboard(public_url, event) if notification.kind != "resolved" else [],
+                        body,
+                        keyboard=link_keyboard(public_url, event, lang) if notification.kind != "resolved" else [],
                         silent=silent,
                         reply_to=reply_to,
                     )
-                else:
-                    message_id = await bot.send(chat_id, text, keyboard=keyboard, silent=silent, reply_to=reply_to)
+                return await bot.send(chat_id, body, keyboard=keyboard, silent=silent, reply_to=reply_to)
+
+            try:
+                try:
+                    message_id = await deliver(text)
+                except Exception as exc:
+                    if text == fallback or "parse" not in str(exc).lower():
+                        raise
+                    log.warning("Шаблон уведомления не принят Telegram, отправляю стандартный: %s", exc)
+                    message_id = await deliver(fallback)
                 notification.telegram_status = "sent"
                 notification.telegram_chat_id = chat_id
                 notification.telegram_message_id = message_id
@@ -161,11 +180,13 @@ class Notifier:
                     )
                 )
             ).scalars().all()
+            public_url = self.settings.get("public_url") or ""
             for notification in rows:
-                text = render_event(event, notification.kind, acked, resolved)
+                user = await session.get(User, notification.user_id)
+                lang = (user.language if user else "") or "ru"
+                text = self.render(event, notification.kind, acked, resolved, lang, public_url)
                 try:
                     if notification.telegram_via_personal:
-                        user = await session.get(User, notification.user_id)
                         token = self.crypto.decrypt(user.personal_bot_token or "") if user else ""
                         if token:
                             await bot.edit_personal(
@@ -173,14 +194,14 @@ class Notifier:
                                 notification.telegram_chat_id,
                                 notification.telegram_message_id,
                                 text,
-                                keyboard=link_keyboard(self.settings.get("public_url"), event),
+                                keyboard=link_keyboard(public_url, event, lang),
                             )
                     elif bot.available:
                         await bot.edit(
                             notification.telegram_chat_id,
                             notification.telegram_message_id,
                             text,
-                            keyboard=event_keyboard(event),
+                            keyboard=event_keyboard(event, lang),
                         )
                 except Exception as exc:
                     log.debug("Не удалось обновить сообщение %s: %s", notification.telegram_message_id, exc)

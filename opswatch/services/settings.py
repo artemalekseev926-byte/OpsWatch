@@ -29,7 +29,12 @@ DEFAULTS: dict[str, Any] = {
     "s3_secret_key": "",
     "s3_prefix": "opswatch/",
     "s3_link_days": 7,
+    "language": "ru",
 }
+
+for _kind in ("event", "repeat", "escalation", "resolved"):
+    for _lang in ("ru", "en"):
+        DEFAULTS[f"template_{_kind}_{_lang}"] = ""
 
 SECRET_KEYS = {"telegram_token", "s3_secret_key"}
 

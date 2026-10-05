@@ -579,3 +579,9 @@ legend { padding: 0 6px; color: var(--muted); font-size: 12.5px; font-weight: 60
 .sparkline circle { fill: var(--accent); }
 .spark-btn { display: flex; align-items: center; gap: 8px; background: transparent; border: 0; padding: 2px 0; cursor: pointer; color: inherit; font: inherit; text-align: left; }
 .spark-btn:hover .sparkline polyline { stroke-width: 2; }
+
+.tg-bubble { background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px 14px 14px 4px; padding: 10px 12px; max-width: 460px; }
+.tg-text { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; line-height: 1.45; }
+.tg-text code, .tg-text pre { background: var(--surface); padding: 0 4px; border-radius: 4px; }
+.tg-buttons { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+.tg-buttons span { flex: 1; text-align: center; padding: 6px 8px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); font-size: 12.5px; white-space: nowrap; }
