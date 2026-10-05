@@ -1,0 +1,9 @@
+.git
+.github
+data
+build
+dist
+docs/screenshots
+**/__pycache__
+*.zip
+.env

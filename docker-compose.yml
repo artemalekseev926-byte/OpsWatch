@@ -1,0 +1,15 @@
+services:
+  opswatch:
+    build: .
+    image: opswatch:latest
+    container_name: opswatch
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TZ: Europe/Moscow
+    ports:
+      - "8765:8765"
+    volumes:
+      - ./data:/data

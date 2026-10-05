@@ -1,0 +1,114 @@
+name: Windows build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Опубликовать релиз с zip-архивом"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[all]" pyinstaller
+
+      - name: Read version
+        id: meta
+        shell: pwsh
+        run: |
+          $v = python -c "import opswatch; print(opswatch.__version__)"
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Generate icon
+        run: python packaging/make_icon.py packaging
+
+      - name: Build executables
+        run: pyinstaller --noconfirm --clean --distpath dist --workpath build packaging/opswatch.spec
+
+      - name: Self-test OpsWatch.exe
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "selftest.txt"
+          $p = Start-Process -FilePath "dist\OpsWatch\OpsWatch.exe" -ArgumentList "--selftest","--report",$report -Wait -PassThru
+          Get-Content $report
+          if ($p.ExitCode -ne 0) { throw "selftest failed with code $($p.ExitCode)" }
+
+      - name: Test Windows service
+        shell: pwsh
+        run: |
+          $exe = "dist\OpsWatch\OpsWatchServer.exe"
+          & $exe install
+          & $exe start
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try {
+              $r = Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/health" -TimeoutSec 3
+              if ($r.status -eq "ok") { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 2
+          }
+          & $exe status
+          if ($ok) {
+            $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8765/api/auth/login" -ContentType "application/json" -Body '{"username":"admin1","password":"admin1"}'
+            Write-Host "login ok: $($login.user.username)"
+          }
+          & $exe stop
+          Start-Sleep -Seconds 5
+          & $exe remove
+          if (-not $ok) {
+            Get-Content "dist\OpsWatch\data\logs\opswatch.log" -ErrorAction SilentlyContinue
+            throw "service did not start"
+          }
+          Remove-Item -Recurse -Force "dist\OpsWatch\data" -ErrorAction SilentlyContinue
+
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $dir = "dist\OpsWatch"
+          Copy-Item "packaging\README.txt" "$dir\README.txt"
+          Copy-Item ".env.example" "$dir\.env.example"
+          New-Item -ItemType Directory "$dir\examples" -Force | Out-Null
+          Copy-Item "examples\*" "$dir\examples\" -Recurse
+          New-Item -ItemType Directory "$dir\plugins" -Force | Out-Null
+          Copy-Item "packaging\plugins_readme.txt" "$dir\plugins\README.txt"
+          Copy-Item "LICENSE" "$dir\LICENSE.txt"
+          $zip = "OpsWatch-${{ steps.meta.outputs.version }}-windows-x64.zip"
+          Compress-Archive -Path $dir -DestinationPath $zip -CompressionLevel Optimal
+          Get-Item $zip | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpsWatch-${{ steps.meta.outputs.version }}-windows-x64
+          path: OpsWatch-*.zip
+          if-no-files-found: error
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v{0}', steps.meta.outputs.version) }}
+          name: OpsWatch ${{ steps.meta.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: OpsWatch-*.zip
+          body: |
+            Скачайте OpsWatch-${{ steps.meta.outputs.version }}-windows-x64.zip, распакуйте и запустите OpsWatch.exe.
+            Вход по умолчанию: admin1 / admin1.
