@@ -107,6 +107,7 @@ jobs:
             Get-WinEvent -LogName Application -MaxEvents 30 -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -match "OpsWatch|Service Control|Python|Application Error" } | Format-List TimeCreated, ProviderName, Message
             Get-WinEvent -LogName System -MaxEvents 30 -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -match "Service Control" } | Format-List TimeCreated, Message
             Get-Content "dist\OpsWatch\data\logs\opswatch.log" -ErrorAction SilentlyContinue
+            Get-Content "dist\OpsWatch\service-error.log" -ErrorAction SilentlyContinue
             throw "service did not start"
           }
           Remove-Item -Recurse -Force "dist\OpsWatch\data" -ErrorAction SilentlyContinue

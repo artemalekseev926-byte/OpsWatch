@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import sys
+import traceback
+from datetime import datetime
 
 from opswatch import APP_NAME, __version__
-from opswatch.config import AppConfig
+from opswatch.config import AppConfig, app_dir
 from opswatch.logs import ensure_streams, setup_logging
 
 SERVICE_NAME = "OpsWatch"
@@ -23,6 +25,15 @@ USAGE = f"""{APP_NAME} {__version__} — сервер
 Команды службы выполняйте от имени администратора.
 Веб-панель: http://<адрес-компьютера>:8765 (логин admin1 / пароль admin1)
 """
+
+
+def write_service_error(text: str) -> None:
+    try:
+        path = app_dir() / "service-error.log"
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}]\n{text}\n")
+    except OSError:
+        pass
 
 
 def run_console() -> int:
@@ -58,14 +69,20 @@ def _service_class():
             win32event.SetEvent(self.stop_event)
 
         def SvcDoRun(self):
-            from opswatch.server import build_server
+            try:
+                from opswatch.server import build_server
 
-            servicemanager.LogInfoMsg(f"{APP_NAME} {__version__} starting")
-            config = AppConfig.load()
-            setup_logging(config.logs_dir, config.log_level, console=False)
-            self.server = build_server(config)
-            self.server.run()
-            servicemanager.LogInfoMsg(f"{APP_NAME} stopped")
+                servicemanager.LogInfoMsg(f"{APP_NAME} {__version__} starting")
+                config = AppConfig.load()
+                setup_logging(config.logs_dir, config.log_level, console=False)
+                self.server = build_server(config)
+                self.server.run()
+                servicemanager.LogInfoMsg(f"{APP_NAME} stopped")
+            except BaseException:
+                text = traceback.format_exc()
+                write_service_error(text)
+                servicemanager.LogErrorMsg(f"{APP_NAME}: {text}")
+                raise
 
     return OpsWatchService
 
@@ -135,18 +152,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if command:
         return manage(command)
-    import pywintypes
-    import servicemanager
-
-    cls = _service_class()
     try:
+        import pywintypes
+        import servicemanager
+
+        cls = _service_class()
         servicemanager.Initialize()
         servicemanager.PrepareToHostSingle(cls)
         servicemanager.StartServiceCtrlDispatcher()
-    except pywintypes.error as exc:
+    except BaseException as exc:
         if getattr(exc, "winerror", None) == 1063:
             print(USAGE)
             return run_console()
+        write_service_error(traceback.format_exc())
         raise
     return 0
 
