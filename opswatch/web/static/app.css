@@ -393,7 +393,8 @@ table.table { width: 100%; border-collapse: collapse; }
   gap: 6px;
 }
 .source-card .name { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-.source-card .metrics { display: flex; flex-wrap: wrap; gap: 6px; }
+.source-card .metrics { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.source-card .metrics .badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; display: inline-block; }
 .source-card .error-text { color: var(--critical); font-size: 12.5px; word-break: break-word; }
 
 .btn {
@@ -560,3 +561,21 @@ legend { padding: 0 6px; color: var(--muted); font-size: 12.5px; font-weight: 60
 @keyframes spin { to { transform: rotate(360deg); } }
 .pager { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-top: 1px solid var(--border); }
 .stack > .panel + .panel { margin-top: 0; }
+
+.chart { position: relative; }
+.chart-svg { width: 100%; height: auto; display: block; overflow: visible; font-family: var(--font); }
+.chart-svg .grid { stroke: var(--border); stroke-width: 1; }
+.chart-svg .axis { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart-svg .line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart-svg .area { fill: var(--accent); opacity: 0.1; }
+.chart-svg .dot { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.chart-svg .end-label { fill: var(--text); font-size: 12px; font-weight: 600; }
+.chart-svg .crosshair { stroke: var(--border-strong); stroke-width: 1; }
+.chart-svg rect:focus { outline: none; }
+.chart-tip { position: absolute; transform: translateX(-50%); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); padding: 6px 10px; pointer-events: none; white-space: nowrap; z-index: 2; }
+.chart-area { min-height: 280px; transition: opacity 0.15s; }
+.chart-area.loading { opacity: 0.5; }
+.sparkline polyline { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.sparkline circle { fill: var(--accent); }
+.spark-btn { display: flex; align-items: center; gap: 8px; background: transparent; border: 0; padding: 2px 0; cursor: pointer; color: inherit; font: inherit; text-align: left; }
+.spark-btn:hover .sparkline polyline { stroke-width: 2; }

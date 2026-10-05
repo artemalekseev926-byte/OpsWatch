@@ -12,9 +12,10 @@ from opswatch.connectors import ConnectorError, SourceContext, get_connector_cla
 from opswatch.connectors.sql import SqlConnector
 from opswatch.constants import CATEGORIES
 from opswatch.core.ingest import parse_alertmanager, parse_generic, parse_zabbix
-from opswatch.db import utcnow
+from opswatch.core.metrics import PERIODS, PRIMARY, describe
+from opswatch.db import iso, utcnow
 from opswatch.models import Source, User
-from opswatch.permissions import has_perm
+from opswatch.permissions import can_view_event, has_perm
 from opswatch.security import new_token, safe_equals
 from opswatch.services.queries import visible_sources
 from opswatch.web.deps import active_user, get_rt, require
@@ -213,6 +214,52 @@ async def regenerate_token(
         await session.commit()
         await session.refresh(source)
     return serialize(rt, source, True, base_url(request, rt))
+
+
+async def visible_source(rt, user: User, source_id: int) -> Source:
+    async with rt.db.session() as session:
+        source = await session.get(Source, source_id)
+    if source is None or not can_view_event(user, source.category, source.visible_roles):
+        raise HTTPException(404, "Источник не найден")
+    return source
+
+
+@router.get("/sources/{source_id}/metrics")
+async def source_metrics(source_id: int, user: User = Depends(active_user), rt=Depends(get_rt)):
+    source = await visible_source(rt, user, source_id)
+    series = await rt.metrics.series(source.id)
+    primary = PRIMARY.get(source.type)
+    for item in series:
+        item["last_at"] = iso(item["last_at"])
+        item["primary"] = item["name"] == primary
+    return {"source": {"id": source.id, "name": source.name, "type": source.type}, "series": series}
+
+
+@router.get("/sources/{source_id}/metrics/{name}")
+async def source_metric_points(
+    source_id: int, name: str, period: str = "24h", user: User = Depends(active_user), rt=Depends(get_rt)
+):
+    source = await visible_source(rt, user, source_id)
+    if period not in PERIODS:
+        raise HTTPException(422, "Неизвестный период")
+    points = await rt.metrics.points(source.id, name, period)
+    return {**describe(name), "period": period, "points": [[iso(ts), round(value, 4)] for ts, value in points]}
+
+
+@router.get("/metrics/sparklines")
+async def sparklines(category: str = "", user: User = Depends(active_user), rt=Depends(get_rt)):
+    async with rt.db.session() as session:
+        categories = [c for c in category.split(",") if c] or None
+        sources = await visible_sources(session, user, categories)
+    result = {}
+    for source in sources:
+        name = PRIMARY.get(source.type)
+        if not name:
+            continue
+        values = await rt.metrics.sparkline(source.id, name)
+        if len(values) >= 2:
+            result[str(source.id)] = {**describe(name), "values": values}
+    return result
 
 
 @router.post("/ingest/{token}")

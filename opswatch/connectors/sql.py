@@ -231,7 +231,7 @@ class PostgresConnector(SqlConnector):
 
     async def server_version(self) -> str:
         rows = await self.fetch("SHOW server_version")
-        return f"PostgreSQL {next(iter(rows[0].values()))}" if rows else "PostgreSQL"
+        return f"PostgreSQL {str(next(iter(rows[0].values()))).split(' ')[0]}" if rows else "PostgreSQL"
 
     async def database_size(self) -> int | None:
         rows = await self.fetch("SELECT pg_database_size(current_database()) AS size")

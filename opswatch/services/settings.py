@@ -15,6 +15,7 @@ DEFAULTS: dict[str, Any] = {
     "registration_enabled": True,
     "group_window_min": 10,
     "event_retention_days": 90,
+    "metric_retention_days": 30,
     "bot_public_bugs": False,
     "backup_dir": "",
     "telegram_part_mb": 49,
@@ -32,7 +33,7 @@ DEFAULTS: dict[str, Any] = {
 
 SECRET_KEYS = {"telegram_token", "s3_secret_key"}
 
-INT_KEYS = {"group_window_min", "event_retention_days", "telegram_part_mb", "s3_link_days"}
+INT_KEYS = {"group_window_min", "event_retention_days", "metric_retention_days", "telegram_part_mb", "s3_link_days"}
 BOOL_KEYS = {"registration_enabled", "bot_public_bugs"}
 
 

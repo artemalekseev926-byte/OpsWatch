@@ -151,3 +151,4 @@ class Scheduler:
                     (self.rt.config.attachments_dir / attachment.stored_name).unlink(missing_ok=True)
                 await session.delete(event)
             await session.commit()
+        await self.rt.metrics.cleanup(int(self.rt.settings.get("metric_retention_days") or 30))

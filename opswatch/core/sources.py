@@ -16,8 +16,9 @@ POLL_TIMEOUT = 600
 
 
 class SourceService:
-    def __init__(self, db, crypto, settings, pipeline, tmp_dir) -> None:
+    def __init__(self, db, crypto, settings, pipeline, tmp_dir, metrics=None) -> None:
         self.db = db
+        self.metrics = metrics
         self.crypto = crypto
         self.settings = settings
         self.pipeline = pipeline
@@ -141,6 +142,11 @@ class SourceService:
                     if result.state is not None:
                         source.state = result.state
                 await session.commit()
+            if not error and self.metrics is not None and result.metrics:
+                try:
+                    await self.metrics.record(source_id, result.metrics)
+                except Exception:
+                    log.exception("Не удалось сохранить метрики источника %s", name)
             down_fp = make_fingerprint("src", source_id, "down")
             events: list[EventIn] = []
             if error:

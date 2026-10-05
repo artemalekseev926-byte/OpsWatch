@@ -52,6 +52,7 @@ const ICONS = {
   inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
   moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  chart: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
   server: '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
 };
 
@@ -245,6 +246,234 @@ function humanSize(n) {
     i++;
   }
   return (i === 0 ? v.toFixed(0) : v.toFixed(1)) + " " + units[i];
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svg(tag, attrs, ...kids) {
+  const el = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v !== null && v !== undefined) el.setAttribute(k, String(v));
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    el.append(kid instanceof Node ? kid : document.createTextNode(String(kid)));
+  }
+  return el;
+}
+
+function formatMetric(value, unit) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
+  const num = (v, digits) => Number(v).toLocaleString("ru-RU", { maximumFractionDigits: digits });
+  switch (unit) {
+    case "bytes":
+      return humanSize(value);
+    case "ms":
+      return num(Math.round(value), 0) + " мс";
+    case "sec":
+      return num(value, value >= 100 ? 0 : 1) + " с";
+    case "mb":
+      return humanSize(value * 1024 * 1024);
+    case "gb":
+      return humanSize(value * 1024 * 1024 * 1024);
+    case "percent":
+      return num(value, 1) + "%";
+    default:
+      return num(value, Number.isInteger(value) ? 0 : 1);
+  }
+}
+
+function niceTicks(min, max, count = 4) {
+  if (min === max) {
+    const pad = Math.abs(min) * 0.1 || 1;
+    min -= pad;
+    max += pad;
+  }
+  const span = max - min;
+  const raw = span / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((candidate) => span / candidate <= count) || 10 * mag;
+  const start = Math.floor(min / step) * step;
+  const end = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = start; v <= end + step / 2; v += step) ticks.push(Number(v.toFixed(10)));
+  return ticks;
+}
+
+function formatTick(ms, span) {
+  const d = new Date(ms);
+  if (span <= 36 * 3600 * 1000) return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
+
+function lineChart(points, unit, label) {
+  const W = 760;
+  const H = 260;
+  const M = { top: 18, right: 72, bottom: 30, left: 70 };
+  const xs = points.map((p) => new Date(p[0]).getTime());
+  const ys = points.map((p) => p[1]);
+  let xMin = xs[0];
+  let xMax = xs[xs.length - 1];
+  if (xMin === xMax) {
+    xMin -= 3600 * 1000;
+    xMax += 3600 * 1000;
+  }
+  const ticks = niceTicks(Math.min(...ys), Math.max(...ys));
+  const yMin = ticks[0];
+  const yMax = ticks[ticks.length - 1];
+  const x = (t) => M.left + ((t - xMin) / (xMax - xMin)) * (W - M.left - M.right);
+  const y = (v) => M.top + (1 - (v - yMin) / (yMax - yMin || 1)) * (H - M.top - M.bottom);
+  const diffs = xs.slice(1).map((t, i) => t - xs[i]).sort((a, b) => a - b);
+  const typical = diffs.length ? diffs[Math.floor(diffs.length / 2)] : 0;
+  let line = "";
+  let area = "";
+  let segment = [];
+  const flush = () => {
+    if (!segment.length) return;
+    line += segment.map((i, k) => `${k ? "L" : "M"}${x(xs[i]).toFixed(1)},${y(ys[i]).toFixed(1)}`).join("");
+    if (segment.length > 1) {
+      const first = segment[0];
+      const last = segment[segment.length - 1];
+      area += `M${x(xs[first]).toFixed(1)},${y(yMin).toFixed(1)}` + segment.map((i) => `L${x(xs[i]).toFixed(1)},${y(ys[i]).toFixed(1)}`).join("") + `L${x(xs[last]).toFixed(1)},${y(yMin).toFixed(1)}Z`;
+    }
+    segment = [];
+  };
+  xs.forEach((t, i) => {
+    if (i && typical && t - xs[i - 1] > typical * 3) flush();
+    segment.push(i);
+  });
+  flush();
+  const span = xMax - xMin;
+  const xTicks = [];
+  for (let i = 0; i <= 4; i++) xTicks.push(xMin + (span * i) / 4);
+  const last = points.length - 1;
+  const crosshair = svg("line", { class: "crosshair", y1: M.top, y2: H - M.bottom, visibility: "hidden" });
+  const hoverDot = svg("circle", { class: "dot", r: 4, visibility: "hidden" });
+  const chart = svg(
+    "svg",
+    { viewBox: `0 0 ${W} ${H}`, class: "chart-svg", role: "img", "aria-label": label },
+    ticks.map((t) => [
+      svg("line", { class: "grid", x1: M.left, x2: W - M.right, y1: y(t), y2: y(t) }),
+      svg("text", { class: "axis", x: M.left - 8, y: y(t) + 4, "text-anchor": "end" }, formatMetric(t, unit)),
+    ]),
+    xTicks.map((t, i) => svg("text", { class: "axis", x: x(t), y: H - 8, "text-anchor": i === 0 ? "start" : i === 4 ? "end" : "middle" }, formatTick(t, span))),
+    svg("path", { class: "area", d: area }),
+    svg("path", { class: "line", d: line }),
+    crosshair,
+    svg("circle", { class: "dot", cx: x(xs[last]), cy: y(ys[last]), r: 4 }),
+    svg("text", { class: "end-label", x: x(xs[last]) + 9, y: y(ys[last]) + 4 }, formatMetric(ys[last], unit)),
+    hoverDot
+  );
+  const tip = h("div", { class: "chart-tip hidden" });
+  const wrap = h("div", { class: "chart" }, chart, tip);
+  const hit = svg("rect", { x: M.left, y: M.top, width: W - M.left - M.right, height: H - M.top - M.bottom, fill: "transparent", tabindex: 0 });
+  const show = (index) => {
+    const px = x(xs[index]);
+    const py = y(ys[index]);
+    crosshair.setAttribute("x1", px);
+    crosshair.setAttribute("x2", px);
+    crosshair.setAttribute("visibility", "visible");
+    hoverDot.setAttribute("cx", px);
+    hoverDot.setAttribute("cy", py);
+    hoverDot.setAttribute("visibility", "visible");
+    tip.replaceChildren(h("strong", null, formatMetric(ys[index], unit)), h("div", { class: "muted small" }, fmtDate(points[index][0])));
+    tip.classList.remove("hidden");
+    const rect = chart.getBoundingClientRect();
+    const left = (px / W) * rect.width;
+    tip.style.left = Math.min(Math.max(left, 60), rect.width - 60) + "px";
+    tip.style.top = Math.max(0, (py / H) * rect.height - 58) + "px";
+  };
+  const hide = () => {
+    crosshair.setAttribute("visibility", "hidden");
+    hoverDot.setAttribute("visibility", "hidden");
+    tip.classList.add("hidden");
+  };
+  let focusIndex = last;
+  hit.addEventListener("pointermove", (e) => {
+    const rect = chart.getBoundingClientRect();
+    const t = xMin + (((e.clientX - rect.left) * (W / rect.width) - M.left) / (W - M.left - M.right)) * span;
+    let best = 0;
+    for (let i = 1; i < xs.length; i++) if (Math.abs(xs[i] - t) < Math.abs(xs[best] - t)) best = i;
+    focusIndex = best;
+    show(best);
+  });
+  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("focus", () => show(focusIndex));
+  hit.addEventListener("blur", hide);
+  hit.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft") focusIndex = Math.max(0, focusIndex - 1);
+    else if (e.key === "ArrowRight") focusIndex = Math.min(last, focusIndex + 1);
+    else return;
+    e.preventDefault();
+    show(focusIndex);
+  });
+  chart.append(hit);
+  return wrap;
+}
+
+function sparkline(values, title) {
+  const W = 120;
+  const H = 28;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const sx = (i) => 2 + (i / (values.length - 1)) * (W - 8);
+  const sy = (v) => (max === min ? H / 2 : 3 + (1 - (v - min) / (max - min)) * (H - 6));
+  const pointsAttr = values.map((v, i) => `${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(" ");
+  const last = values.length - 1;
+  return svg(
+    "svg",
+    { viewBox: `0 0 ${W} ${H}`, class: "sparkline", width: W, height: H, role: "img", "aria-label": title },
+    svg("title", null, title),
+    svg("polyline", { points: pointsAttr }),
+    svg("circle", { cx: sx(last), cy: sy(values[last]), r: 2.5 })
+  );
+}
+
+async function openMetrics(source) {
+  let data;
+  try {
+    data = await api(`/api/sources/${source.id}/metrics`);
+  } catch (err) {
+    toast(err.message, "error");
+    return;
+  }
+  const series = data.series;
+  const st = { name: (series.find((s) => s.primary) || series[0] || {}).name, period: "24h" };
+  const metricChips = h("div", { class: "chips" });
+  const periodChips = h("div", { class: "chips" });
+  const area = h("div", { class: "chart-area" });
+  const table = h("div");
+  async function load() {
+    metricChips.replaceChildren(...series.map((s) => h("button", { class: "chip" + (st.name === s.name ? " active" : ""), onclick: () => { st.name = s.name; load(); } }, s.title)));
+    periodChips.replaceChildren(...[["24h", "24 часа"], ["7d", "7 дней"], ["30d", "30 дней"]].map(([v, t]) => h("button", { class: "chip" + (st.period === v ? " active" : ""), onclick: () => { st.period = v; load(); } }, t)));
+    area.classList.add("loading");
+    const result = await guard(() => api(`/api/sources/${source.id}/metrics/${encodeURIComponent(st.name)}?period=${st.period}`));
+    area.classList.remove("loading");
+    if (!result) return;
+    if (!result.points.length) {
+      area.replaceChildren(emptyState("chart", "За выбранный период данных нет"));
+      table.replaceChildren();
+      return;
+    }
+    area.replaceChildren(h("div", { class: "between", style: "margin-bottom:6px" }, h("strong", null, result.title), h("span", { class: "muted small" }, "Последнее значение: ", formatMetric(result.points[result.points.length - 1][1], result.unit))), lineChart(result.points, result.unit, result.title));
+    table.replaceChildren(
+      h(
+        "details",
+        null,
+        h("summary", { class: "muted small", style: "cursor:pointer" }, "Таблица значений"),
+        h(
+          "div",
+          { class: "table-wrap", style: "max-height:260px;overflow-y:auto;margin-top:8px" },
+          h("table", { class: "table" }, h("thead", null, h("tr", null, h("th", null, "Время"), h("th", { class: "right" }, result.title))), h("tbody", null, result.points.slice().reverse().map((p) => h("tr", null, h("td", null, fmtDate(p[0])), h("td", { class: "right mono" }, formatMetric(p[1], result.unit))))))
+        )
+      )
+    );
+  }
+  const body = series.length
+    ? h("div", { class: "stack" }, h("div", { class: "row" }, periodChips, h("span", { class: "tab-sep", style: "height:22px;margin:0 4px" }), metricChips), area, table)
+    : emptyState("chart", "Данных пока нет — значения сохраняются при опросе источника, не чаще раза в 5 минут");
+  modal({ title: data.source.name, subtitle: "Графики метрик", body, wide: true });
+  if (series.length) load();
 }
 
 function sevBadge(sev) {
@@ -880,7 +1109,7 @@ function metricBadges(source) {
   return items.map((t) => h("span", { class: "badge outline" }, t));
 }
 
-function sourceCard(source, reload) {
+function sourceCard(source, reload, spark) {
   const status = source.status || "unknown";
   return h(
     "div",
@@ -888,11 +1117,18 @@ function sourceCard(source, reload) {
     h("div", { class: "between" }, h("div", { class: "name" }, h("span", { class: "dot " + status }), source.name), source.enabled ? null : h("span", { class: "badge" }, "Выключен")),
     h("div", { class: "muted small" }, source.type_title, " · ", SOURCE_STATUS[status] || status),
     h("div", { class: "metrics" }, metricBadges(source)),
+    spark
+      ? h("button", { class: "spark-btn", title: "Открыть график", onclick: () => openMetrics(source) }, sparkline(spark.values, spark.title + " за 24 часа"), h("span", { class: "muted small" }, spark.title, " · 24 ч"))
+      : null,
     source.last_error ? h("div", { class: "error-text" }, source.last_error.slice(0, 220)) : null,
     h(
       "div",
       { class: "between" },
       h("span", { class: "faint small" }, source.last_check_at ? "Проверено " + ago(source.last_check_at) : source.passive ? "Принимает webhook" : "Ещё не проверялся"),
+      h(
+        "div",
+        { class: "row", style: "gap:2px" },
+        source.passive ? null : h("button", { class: "btn sm ghost", title: "Графики", onclick: () => openMetrics(source) }, icon("chart")),
       can("sources.manage") && !source.passive
         ? h("button", {
             class: "btn sm ghost",
@@ -904,6 +1140,7 @@ function sourceCard(source, reload) {
             },
           }, icon("refresh"), "Проверить")
         : null
+      )
     )
   );
 }
@@ -975,12 +1212,14 @@ function categoryPage(cat, title, subtitle) {
     const actions = can("sources.manage") ? h("button", { class: "btn", onclick: () => sourceForm(null, cat) }, icon("plus"), "Источник") : null;
     append(root, pageHead(title, subtitle, actions));
     const grid = h("div", { class: "sources-grid" });
+    let sparks = await api("/api/metrics/sparklines?category=" + cat).catch(() => ({}));
     const drawSources = (items) => {
-      grid.replaceChildren(...items.map((s) => sourceCard(s, reloadSources)));
+      grid.replaceChildren(...items.map((s) => sourceCard(s, reloadSources, sparks[String(s.id)])));
       grid.classList.toggle("hidden", !items.length);
     };
     const reloadSources = async () => {
       const data = await api("/api/sources?category=" + cat).catch(() => null);
+      sparks = (await api("/api/metrics/sparklines?category=" + cat).catch(() => null)) || sparks;
       if (data) drawSources(data.items);
     };
     drawSources(sources.items);
@@ -1312,6 +1551,7 @@ async function pageSources(root) {
                 h(
                   "td",
                   { class: "right nowrap" },
+                  !s.passive ? h("button", { class: "btn sm ghost", title: "Графики", onclick: () => openMetrics(s) }, icon("chart")) : null,
                   !s.passive ? h("button", { class: "btn sm ghost", title: "Проверить сейчас", onclick: async () => { const r = await guard(() => api(`/api/sources/${s.id}/poll`, { body: {} })); if (r) toast(r.ok ? "OK: " + r.message : "Ошибка: " + r.message, r.ok ? "" : "error"); renderPage(); } }, icon("refresh")) : null,
                   h("button", { class: "btn sm ghost", title: "Изменить", onclick: () => sourceForm(s) }, icon("edit")),
                   h("button", { class: "btn sm ghost danger", title: "Удалить", onclick: () => confirmDialog(`Удалить источник «${s.name}»? История событий сохранится.`, async () => { await guard(() => api(`/api/sources/${s.id}`, { method: "DELETE" }), "Источник удалён"); S.meta = await api("/api/meta"); renderPage(); }) }, icon("trash"))

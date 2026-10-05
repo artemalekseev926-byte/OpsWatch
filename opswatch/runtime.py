@@ -8,6 +8,7 @@ from opswatch.backup.manager import BackupManager
 from opswatch.bot.manager import BotManager
 from opswatch.config import AppConfig
 from opswatch.connectors import load_connectors
+from opswatch.core.metrics import MetricStore
 from opswatch.core.notifier import Notifier
 from opswatch.core.pipeline import EventPipeline
 from opswatch.core.scheduler import Scheduler
@@ -39,7 +40,8 @@ class Runtime:
         self.bot = BotManager(self)
         self.notifier = Notifier(self.db, self.settings, self.crypto, lambda: self.bot)
         self.pipeline = EventPipeline(self.db, self.settings, self.notifier)
-        self.sources = SourceService(self.db, self.crypto, self.settings, self.pipeline, config.tmp_dir)
+        self.metrics = MetricStore(self.db)
+        self.sources = SourceService(self.db, self.crypto, self.settings, self.pipeline, config.tmp_dir, self.metrics)
         self.backups = BackupManager(
             self.db, self.crypto, self.settings, self.sources, self.pipeline, lambda: self.bot, config
         )
