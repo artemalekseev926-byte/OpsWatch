@@ -1,0 +1,23 @@
+process              : f2f50000-0000-0000-0000-000000000001
+host                 : srv1c
+port                 : 1560
+pid                  : 4321
+turned-on            : yes
+running              : yes
+use                  : used
+available-perfomance : 120
+connections          : 25
+memory-size          : 2560000
+avg-call-time        : 0.250
+
+process              : f2f50000-0000-0000-0000-000000000002
+host                 : srv1c
+port                 : 1561
+pid                  : 4400
+turned-on            : yes
+running              : yes
+use                  : used
+available-perfomance : 35
+connections          : 3
+memory-size          : 512000
+

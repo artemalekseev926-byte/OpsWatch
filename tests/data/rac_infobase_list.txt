@@ -1,0 +1,8 @@
+infobase : 0d8e9f6a-1111-4c5e-9a39-0e3bd3d3a001
+name     : buh
+descr    : "Бухгалтерия предприятия"
+
+infobase : 0d8e9f6a-2222-4c5e-9a39-0e3bd3d3a002
+name     : zup
+descr    : ""
+

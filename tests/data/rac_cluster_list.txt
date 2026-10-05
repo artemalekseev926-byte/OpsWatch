@@ -1,0 +1,9 @@
+cluster                       : 9b0a37ca-6e7c-4ef8-9f3e-cfa63d3e5e2c
+host                          : srv1c
+port                          : 1541
+name                          : "Локальный кластер"
+expiration-timeout            : 60
+lifetime-limit                : 0
+security-level                : 0
+load-balancing-mode           : performance
+

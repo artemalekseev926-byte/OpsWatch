@@ -1,0 +1,40 @@
+session                          : 3f1f0000-0000-0000-0000-000000000001
+session-id                       : 1
+infobase                         : 0d8e9f6a-1111-4c5e-9a39-0e3bd3d3a001
+connection                       : 00000000-0000-0000-0000-000000000000
+process                          : 00000000-0000-0000-0000-000000000000
+user-name                        : Иванова
+host                             : BUH-PC01
+app-id                           : 1CV8C
+started-at                       : 2026-10-05T09:12:01
+last-active-at                   : 2026-10-05T14:55:40
+hibernate                        : no
+blocked-by-dbms                  : 0
+blocked-by-ls                    : 0
+calls-last-5min                  : 3
+duration-current                 : 125400
+current-service-name             : ""
+db-proc-info                     : "spid 57"
+
+session                          : 3f1f0000-0000-0000-0000-000000000002
+session-id                       : 2
+infobase                         : 0d8e9f6a-1111-4c5e-9a39-0e3bd3d3a001
+user-name                        : Петров
+host                             : BUH-PC02
+app-id                           : 1CV8C
+blocked-by-dbms                  : 1
+blocked-by-ls                    : 0
+calls-last-5min                  : 1
+duration-current                 : 4000
+
+session                          : 3f1f0000-0000-0000-0000-000000000003
+session-id                       : 3
+infobase                         : 0d8e9f6a-2222-4c5e-9a39-0e3bd3d3a002
+user-name                        : Сидорова
+host                             : HR-PC
+app-id                           : 1CV8C
+blocked-by-dbms                  : 0
+blocked-by-ls                    : 0
+calls-last-5min                  : 0
+duration-current                 : 0
+
