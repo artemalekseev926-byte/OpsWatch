@@ -14,6 +14,7 @@ from opswatch.core.pipeline import EventPipeline
 from opswatch.core.scheduler import Scheduler
 from opswatch.core.sources import SourceService
 from opswatch.db import Database
+from opswatch.i18n import ts
 from opswatch.security import Crypto, LoginThrottle
 from opswatch.services.bootstrap import bootstrap
 from opswatch.services.settings import SettingsStore
@@ -60,7 +61,7 @@ class Runtime:
             await self.scheduler.start()
         if self.start_bot:
             self._bot_task = asyncio.create_task(self.bot.start(), name="opswatch-bot-start")
-        log.info("OpsWatch запущен, данные: %s", self.config.data_dir)
+        log.info(ts("OpsWatch запущен, данные: %s"), self.config.data_dir)
 
     async def restart_bot(self) -> None:
         if self.start_bot:

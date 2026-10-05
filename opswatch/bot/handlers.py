@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import logging
 
-from aiogram import Bot, F, Router
+from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -13,6 +13,7 @@ from sqlalchemy import select
 from opswatch.constants import CATEGORY_TITLES, SEVERITY_ICONS
 from opswatch.core.render import esc, render_details, truncate
 from opswatch.db import utcnow
+from opswatch.i18n import current_language, default_language, language, tr
 from opswatch.models import Event, Source, User
 from opswatch.permissions import has_perm, visible_categories
 from opswatch.services.bugs import create_bug, save_attachment
@@ -46,7 +47,7 @@ async def linked_user(rt, chat_id: int) -> User | None:
 def subscriptions_keyboard(states: list[dict]) -> InlineKeyboardMarkup:
     rows = []
     for state in states:
-        title = CATEGORY_TITLES.get(state["category"], state["category"])
+        title = tr(CATEGORY_TITLES.get(state["category"], state["category"]))
         rows.append(
             [
                 InlineKeyboardButton(
@@ -67,8 +68,25 @@ SUB_TEXT = (
 )
 
 
+class LanguageMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        rt = data.get("rt")
+        chat = data.get("event_chat")
+        sender = data.get("event_from_user")
+        lang = ""
+        if rt is not None and chat is not None:
+            async with rt.db.session() as session:
+                lang = await session.scalar(select(User.language).where(User.telegram_chat_id == chat.id)) or ""
+        if not lang and sender is not None and sender.language_code:
+            lang = "ru" if sender.language_code.lower().startswith(("ru", "uk", "be", "kk")) else "en"
+        with language(lang or default_language()):
+            return await handler(event, data)
+
+
 def build_router() -> Router:
     router = Router(name="opswatch")
+    router.message.middleware(LanguageMiddleware())
+    router.callback_query.middleware(LanguageMiddleware())
 
     @router.message(CommandStart())
     async def start(message: Message, command: CommandObject, rt) -> None:
@@ -77,7 +95,7 @@ def build_router() -> Router:
             async with rt.db.session() as session:
                 user = await session.scalar(select(User).where(User.telegram_link_code == code))
                 if user is None or (user.telegram_link_expires and user.telegram_link_expires < utcnow()):
-                    await message.answer("Код привязки не найден или устарел. Получите новый код в профиле OpsWatch.")
+                    await message.answer(tr("Код привязки не найден или устарел. Получите новый код в профиле OpsWatch."))
                     return
                 previous = (
                     await session.execute(select(User).where(User.telegram_chat_id == message.chat.id, User.id != user.id))
@@ -92,42 +110,39 @@ def build_router() -> Router:
                 await session.commit()
                 name = user.full_name or user.username
                 status = user.status
-            text = f"✅ Telegram привязан к аккаунту <b>{esc(name)}</b>."
+            text = tr("✅ Telegram привязан к аккаунту <b>{name}</b>.", name=esc(name))
             if status != "active":
-                text += "\nУчётная запись ещё не подтверждена администратором — уведомления начнут приходить после подтверждения."
-            await message.answer(text + "\n\n" + HELP)
+                text += tr("\nУчётная запись ещё не подтверждена администратором — уведомления начнут приходить после подтверждения.")
+            await message.answer(text + "\n\n" + tr(HELP))
             return
         user = await linked_user(rt, message.chat.id)
         if user is None:
             await message.answer(
-                "👋 Это бот OpsWatch.\n\nЧтобы получать уведомления, откройте <b>Профиль</b> в OpsWatch и нажмите "
-                "«Привязать Telegram». Затем перейдите по ссылке или отправьте сюда команду "
-                "<code>/start КОД</code>.\n\n"
-                f"Ваш chat id: <code>{message.chat.id}</code>"
+                tr("👋 Это бот OpsWatch.\n\nЧтобы получать уведомления, откройте <b>Профиль</b> в OpsWatch и нажмите «Привязать Telegram». Затем перейдите по ссылке или отправьте сюда команду <code>/start КОД</code>.\n\nВаш chat id: <code>{id}</code>", id=message.chat.id)
             )
             return
-        await message.answer(f"Здравствуйте, {esc(user.full_name or user.username)}!\n\n" + HELP)
+        await message.answer(tr("Здравствуйте, {name}!", name=esc(user.full_name or user.username)) + "\n\n" + tr(HELP))
 
     @router.message(Command("help"))
     async def help_command(message: Message) -> None:
-        await message.answer(HELP)
+        await message.answer(tr(HELP))
 
     @router.message(Command("unlink"))
     async def unlink(message: Message, rt) -> None:
         async with rt.db.session() as session:
             user = await session.scalar(select(User).where(User.telegram_chat_id == message.chat.id))
             if user is None:
-                await message.answer("Этот чат не привязан к аккаунту OpsWatch.")
+                await message.answer(tr("Этот чат не привязан к аккаунту OpsWatch."))
                 return
             user.telegram_chat_id = None
             await session.commit()
-        await message.answer("Telegram отвязан. Уведомления больше не будут приходить в этот чат.")
+        await message.answer(tr("Telegram отвязан. Уведомления больше не будут приходить в этот чат."))
 
     @router.message(Command("status"))
     async def status(message: Message, rt) -> None:
         user = await linked_user(rt, message.chat.id)
         if user is None or user.status != "active":
-            await message.answer("Сначала привяжите подтверждённый аккаунт OpsWatch (/start).")
+            await message.answer(tr("Сначала привяжите подтверждённый аккаунт OpsWatch (/start)."))
             return
         async with rt.db.session() as session:
             counts = await open_counts(session, user)
@@ -135,7 +150,7 @@ def build_router() -> Router:
             failing = (
                 await session.execute(select(Source.name).where(Source.status == "error", Source.category.in_(categories or ["-"])))
             ).scalars().all()
-        lines = ["<b>Открытые события</b>"]
+        lines = [tr("<b>Открытые события</b>")]
         total = 0
         for category in categories:
             bucket = counts.get(category, {})
@@ -143,11 +158,11 @@ def build_router() -> Router:
             total += amount
             if amount:
                 parts = " ".join(f"{SEVERITY_ICONS[s]}{bucket[s]}" for s in ("critical", "warning", "info") if bucket.get(s))
-                lines.append(f"{CATEGORY_TITLES[category]}: {parts}")
+                lines.append(f"{tr(CATEGORY_TITLES[category])}: {parts}")
         if total == 0:
-            lines.append("Всё спокойно ✅")
+            lines.append(tr("Всё спокойно ✅"))
         if failing:
-            lines.append("\n<b>Недоступные источники</b>")
+            lines.append(tr("\n<b>Недоступные источники</b>"))
             lines += [f"🔴 {esc(name)}" for name in failing[:15]]
         await message.answer("\n".join(lines))
 
@@ -155,7 +170,7 @@ def build_router() -> Router:
     async def events(message: Message, rt) -> None:
         user = await linked_user(rt, message.chat.id)
         if user is None or user.status != "active":
-            await message.answer("Сначала привяжите подтверждённый аккаунт OpsWatch (/start).")
+            await message.answer(tr("Сначала привяжите подтверждённый аккаунт OpsWatch (/start)."))
             return
         async with rt.db.session() as session:
             query = await visible_events_query(session, user)
@@ -163,13 +178,13 @@ def build_router() -> Router:
                 await session.execute(query.where(Event.status != "resolved").order_by(Event.last_seen_at.desc()).limit(10))
             ).scalars().all()
         if not rows:
-            await message.answer("Открытых событий нет ✅")
+            await message.answer(tr("Открытых событий нет ✅"))
             return
-        lines = ["<b>Последние открытые события</b>"]
+        lines = [tr("<b>Последние открытые события</b>")]
         for event in rows:
             lines.append(f"{SEVERITY_ICONS.get(event.severity, '⚪')} {esc(truncate(event.title, 90))} · #ev{event.id}")
         keyboard = [
-            [InlineKeyboardButton(text=f"#{event.id} подробнее", callback_data=f"ev:info:{event.id}")] for event in rows[:5]
+            [InlineKeyboardButton(text=tr("#{id} подробнее", id=event.id), callback_data=f"ev:info:{event.id}")] for event in rows[:5]
         ]
         await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
@@ -177,14 +192,14 @@ def build_router() -> Router:
     async def subscriptions(message: Message, rt) -> None:
         user = await linked_user(rt, message.chat.id)
         if user is None or user.status != "active":
-            await message.answer("Сначала привяжите подтверждённый аккаунт OpsWatch (/start).")
+            await message.answer(tr("Сначала привяжите подтверждённый аккаунт OpsWatch (/start)."))
             return
         async with rt.db.session() as session:
             states = await get_states(session, user)
         if not states:
-            await message.answer("У вашей роли нет доступа к категориям событий.")
+            await message.answer(tr("У вашей роли нет доступа к категориям событий."))
             return
-        await message.answer(SUB_TEXT, reply_markup=subscriptions_keyboard(states))
+        await message.answer(tr(SUB_TEXT), reply_markup=subscriptions_keyboard(states))
 
     @router.callback_query(F.data.startswith("sub:"))
     async def toggle_subscription(callback: CallbackQuery, rt) -> None:
@@ -192,20 +207,20 @@ def build_router() -> Router:
         async with rt.db.session() as session:
             user = await session.scalar(select(User).where(User.telegram_chat_id == callback.message.chat.id))
             if user is None or user.status != "active":
-                await callback.answer("Аккаунт не привязан", show_alert=True)
+                await callback.answer(tr("Аккаунт не привязан"), show_alert=True)
                 return
             mode = await cycle_state(session, user, category)
             await session.commit()
             states = await get_states(session, user)
         await callback.message.edit_reply_markup(reply_markup=subscriptions_keyboard(states))
-        titles = {"rules": "по правилам", "subscribed": "подписка включена", "muted": "уведомления отключены"}
-        await callback.answer(f"{CATEGORY_TITLES.get(category, category)}: {titles[mode]}")
+        titles = {"rules": tr("по правилам"), "subscribed": tr("подписка включена"), "muted": tr("уведомления отключены")}
+        await callback.answer(f"{tr(CATEGORY_TITLES.get(category, category))}: {titles[mode]}")
 
     async def _accept_bug(message: Message, rt, bot: Bot, text: str) -> None:
         user = await linked_user(rt, message.chat.id)
         allowed = user is not None and has_perm(user, "bugs.report")
         if not allowed and not rt.settings.get("bot_public_bugs"):
-            await message.answer("Отправлять баг-репорты могут только подтверждённые пользователи OpsWatch с правом «Отправка баг-репортов».")
+            await message.answer(tr("Отправлять баг-репорты могут только подтверждённые пользователи OpsWatch с правом «Отправка баг-репортов»."))
             return
         attachments = []
         try:
@@ -226,9 +241,9 @@ def build_router() -> Router:
                     )
                 )
         except ValueError as exc:
-            await message.answer(f"Вложение не принято: {esc(exc)}")
+            await message.answer(tr("Вложение не принято: {error}", error=esc(exc)))
         except Exception:
-            log.exception("Не удалось скачать вложение")
+            log.exception(tr("Не удалось скачать вложение"))
         sender = message.from_user
         label = (user.full_name or user.username) if user else (
             f"@{sender.username}" if sender and sender.username else (sender.full_name if sender else "Telegram")
@@ -243,30 +258,30 @@ def build_router() -> Router:
             channel="telegram",
             extra={"telegram_chat": message.chat.id},
         )
-        await message.answer(f"🐞 Спасибо! Баг-репорт <b>#ev{event.id}</b> зарегистрирован и передан ответственным.")
+        await message.answer(tr("🐞 Спасибо! Баг-репорт <b>#ev{id}</b> зарегистрирован и передан ответственным.", id=event.id))
 
     @router.message(Command("bug"))
     async def bug(message: Message, command: CommandObject, rt, bot: Bot, state: FSMContext) -> None:
         text = (command.args or "").strip()
         if not text:
             await state.set_state(BugForm.text)
-            await message.answer("Опишите проблему одним сообщением. Можно приложить скриншот с подписью. /cancel — отмена.")
+            await message.answer(tr("Опишите проблему одним сообщением. Можно приложить скриншот с подписью. /cancel — отмена."))
             return
         await _accept_bug(message, rt, bot, text)
 
     @router.message(Command("cancel"))
     async def cancel(message: Message, state: FSMContext) -> None:
         await state.clear()
-        await message.answer("Отменено.")
+        await message.answer(tr("Отменено."))
 
     @router.message(BugForm.text)
     async def bug_text(message: Message, rt, bot: Bot, state: FSMContext) -> None:
         text = (message.text or message.caption or "").strip()
         if not text and not message.photo and not message.document:
-            await message.answer("Нужен текст описания проблемы.")
+            await message.answer(tr("Нужен текст описания проблемы."))
             return
         await state.clear()
-        await _accept_bug(message, rt, bot, text or "Скриншот без описания")
+        await _accept_bug(message, rt, bot, text or tr("Скриншот без описания"))
 
     @router.callback_query(F.data.startswith("ev:"))
     async def event_action(callback: CallbackQuery, rt) -> None:
@@ -279,25 +294,25 @@ def build_router() -> Router:
         async with rt.db.session() as session:
             user = await session.scalar(select(User).where(User.telegram_chat_id == callback.message.chat.id))
             if user is None or user.status != "active":
-                await callback.answer("Аккаунт не привязан или не подтверждён", show_alert=True)
+                await callback.answer(tr("Аккаунт не привязан или не подтверждён"), show_alert=True)
                 return
             event = await event_for_user(session, event_id, user)
         if event is None:
-            await callback.answer("Событие недоступно", show_alert=True)
+            await callback.answer(tr("Событие недоступно"), show_alert=True)
             return
         if action == "info":
-            await callback.message.answer(render_details(event, rt.settings.get("public_url") or ""))
+            await callback.message.answer(render_details(event, rt.settings.get("public_url") or "", current_language()))
             await callback.answer()
             return
         if not has_perm(user, "events.manage"):
-            await callback.answer("Недостаточно прав для изменения статуса", show_alert=True)
+            await callback.answer(tr("Недостаточно прав для изменения статуса"), show_alert=True)
             return
         if action == "ack":
             await rt.pipeline.ack(event_id, user)
-            await callback.answer("Принято в работу 👌")
+            await callback.answer(tr("Принято в работу 👌"))
         elif action == "res":
-            await rt.pipeline.resolve(event_id, user, f"Закрыто через Telegram: {user.full_name or user.username}")
-            await callback.answer("Отмечено как решённое ✅")
+            await rt.pipeline.resolve(event_id, user, tr("Закрыто через Telegram: {value}", value=user.full_name or user.username))
+            await callback.answer(tr("Отмечено как решённое ✅"))
         else:
             await callback.answer()
 
@@ -305,8 +320,8 @@ def build_router() -> Router:
     async def fallback(message: Message, rt) -> None:
         user = await linked_user(rt, message.chat.id)
         if user is None:
-            await message.answer("Отправьте /start, чтобы узнать, как привязать аккаунт.")
+            await message.answer(tr("Отправьте /start, чтобы узнать, как привязать аккаунт."))
         else:
-            await message.answer("Не понял команду. /help — список команд, /bug текст — сообщить об ошибке.")
+            await message.answer(tr("Не понял команду. /help — список команд, /bug текст — сообщить об ошибке."))
 
     return router

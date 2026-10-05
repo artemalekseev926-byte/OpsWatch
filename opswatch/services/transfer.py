@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from opswatch import models
 from opswatch.config import normalize_database_url
+from opswatch.i18n import ts
 from opswatch.migrator import upgrade
 
 BATCH = 1000
@@ -33,7 +34,7 @@ async def transfer(
     source_url = normalize_database_url(source_url)
     target_url = normalize_database_url(target_url)
     if source_url == target_url:
-        raise TransferError("Источник и приёмник совпадают")
+        raise TransferError(ts("Источник и приёмник совпадают"))
     say = progress or (lambda message: None)
     source = create_async_engine(source_url)
     target = create_async_engine(target_url)
@@ -46,7 +47,7 @@ async def transfer(
             await connection.run_sync(upgrade)
             existing = await connection.scalar(select(func.count()).select_from(models.User.__table__))
             if existing and not force:
-                raise TransferError("В целевой базе уже есть данные. Используйте --force, чтобы перезаписать их")
+                raise TransferError(ts("В целевой базе уже есть данные. Используйте --force, чтобы перезаписать их"))
             for table in reversed(tables):
                 await connection.execute(table.delete())
         async with source.connect() as reader, target.begin() as writer:

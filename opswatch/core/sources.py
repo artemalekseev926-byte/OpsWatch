@@ -7,6 +7,7 @@ from typing import Any
 from opswatch.connectors import Connector, PollResult, SourceContext, get_connector_class
 from opswatch.core.events import EventIn, make_fingerprint
 from opswatch.db import utcnow
+from opswatch.i18n import ts
 from opswatch.models import Source
 
 log = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ class SourceService:
         cls = get_connector_class(kind)
         ctx = SourceContext(
             id=source_id,
-            name=name or cls.title,
+            name=name or ts(cls.title),
             category=category or cls.category,
             config=config,
             state=state,
@@ -123,10 +124,10 @@ class SourceService:
             try:
                 result = await asyncio.wait_for(connector.poll(), timeout=POLL_TIMEOUT)
             except asyncio.TimeoutError:
-                error = "Превышено время ожидания опроса"
+                error = ts("Превышено время ожидания опроса")
             except Exception as exc:
                 error = str(exc) or type(exc).__name__
-                log.info("Источник %s недоступен: %s", name, error)
+                log.info(ts("Источник %s недоступен: %s"), name, error)
             async with self.db.session() as session:
                 source = await session.get(Source, source_id)
                 if source is None:
@@ -146,13 +147,13 @@ class SourceService:
                 try:
                     await self.metrics.record(source_id, result.metrics)
                 except Exception:
-                    log.exception("Не удалось сохранить метрики источника %s", name)
+                    log.exception(ts("Не удалось сохранить метрики источника %s"), name)
             down_fp = make_fingerprint("src", source_id, "down")
             events: list[EventIn] = []
             if error:
                 events.append(
                     EventIn(
-                        title=f"{name}: источник недоступен",
+                        title=ts("{name}: источник недоступен", name=name),
                         message=error,
                         severity="critical",
                         category=category,
@@ -165,8 +166,8 @@ class SourceService:
             else:
                 events.append(
                     EventIn(
-                        title=f"{name}: источник доступен",
-                        message="Источник снова отвечает",
+                        title=ts("{name}: источник доступен", name=name),
+                        message=ts("Источник снова отвечает"),
                         category=category,
                         source_id=source_id,
                         source_name=name,
@@ -179,7 +180,7 @@ class SourceService:
                 try:
                     await self.pipeline.ingest(item)
                 except Exception:
-                    log.exception("Ошибка обработки события источника %s", name)
+                    log.exception(ts("Ошибка обработки события источника %s"), name)
             return result
 
     async def maintenance(self, source_id: int) -> PollResult | None:
@@ -194,7 +195,7 @@ class SourceService:
             result = PollResult(
                 events=[
                     connector.event(
-                        title=f"{connector.ctx.name}: ошибка обслуживания",
+                        title=ts("{name}: ошибка обслуживания", name=connector.ctx.name),
                         message=str(exc),
                         severity="warning",
                         type="maintenance.error",

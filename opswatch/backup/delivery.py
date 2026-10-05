@@ -8,6 +8,7 @@ from typing import Any
 
 from opswatch.backup.archive import split_file
 from opswatch.core.render import esc
+from opswatch.i18n import ts
 from opswatch.sizes import human_size
 
 log = logging.getLogger(__name__)
@@ -28,10 +29,10 @@ def upload_s3(archive: Path, settings) -> str:
     try:
         import boto3
     except ImportError as exc:
-        raise RuntimeError("Для выгрузки в S3 установите пакет boto3") from exc
+        raise RuntimeError(ts("Для выгрузки в S3 установите пакет boto3")) from exc
     bucket = settings.get("s3_bucket")
     if not bucket:
-        raise RuntimeError("Не указан S3 bucket в настройках")
+        raise RuntimeError(ts("Не указан S3 bucket в настройках"))
     client = boto3.client(
         "s3",
         endpoint_url=settings.get("s3_endpoint") or None,
@@ -93,23 +94,22 @@ async def send_to_telegram(
                 elif stats["mode"] == "parts":
                     total = len(parts)
                     for index, part in enumerate(parts, 1):
-                        part_caption = f"{caption}\nЧасть {index}/{total}" if index == 1 else f"Часть {index}/{total}"
+                        part_caption = ts("{caption}\nЧасть {index}/{total}", caption=caption, index=index, total=total) if index == 1 else ts("Часть {index}/{total}", index=index, total=total)
                         await bot.send_file(chat_id, part, part_caption, token if personal else None)
                     hint = (
-                        "Архив разбит на части. Откройте первую часть в 7-Zip "
-                        f"или объедините: <code>copy /b {esc(archive.name)}.001+{esc(archive.name)}.002 {esc(archive.name)}</code>"
+                        ts("Архив разбит на части. Откройте первую часть в 7-Zip или объедините: <code>copy /b {name}.001+{name}.002 {name}</code>", name=esc(archive.name))
                     )
                     await bot.send_text(chat_id, hint, token if personal else None)
                 elif stats["mode"] == "link":
-                    text = caption + "\n\nФайл больше лимита Telegram, ссылка для скачивания:\n" + "\n".join(esc(x) for x in links)
+                    text = caption + ts("\n\nФайл больше лимита Telegram, ссылка для скачивания:\n") + "\n".join(esc(x) for x in links)
                     await bot.send_text(chat_id, text, token if personal else None)
                 else:
-                    text = caption + f"\n\nФайл {human_size(size)} больше лимита Telegram и сохранён на сервере:\n<code>{esc(archive)}</code>"
+                    text = caption + "\n\n" + ts("Файл {size} больше лимита Telegram и сохранён на сервере:", size=human_size(size)) + f"\n<code>{esc(archive)}</code>"
                     await bot.send_text(chat_id, text, token if personal else None)
                 stats["sent"] += 1
                 stats["recipients"].append(user.username)
             except Exception as exc:
-                log.warning("Не удалось отправить бэкап пользователю %s: %s", user.username, exc)
+                log.warning(ts("Не удалось отправить бэкап пользователю %s: %s"), user.username, exc)
                 stats["failed"] += 1
     finally:
         for part in parts:

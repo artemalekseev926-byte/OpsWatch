@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy import delete, func, select
 
 from opswatch.db import Database, utcnow
+from opswatch.i18n import tr
 from opswatch.models import MetricPoint
 
 METRIC_INFO: dict[str, dict[str, str]] = {
@@ -60,7 +61,7 @@ def numeric_metrics(metrics: dict[str, Any]) -> dict[str, float]:
 def describe(name: str) -> dict[str, str]:
     info = METRIC_INFO.get(name)
     if info:
-        return {"name": name, **info}
+        return {"name": name, "title": tr(info["title"]), "unit": info["unit"]}
     return {"name": name, "title": name, "unit": "count"}
 
 

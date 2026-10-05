@@ -9,6 +9,8 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import inspect
 
+from opswatch.i18n import ts
+
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
 BASELINE = "0001"
 
@@ -37,11 +39,11 @@ def upgrade(connection) -> str | None:
     config = alembic_config(connection)
     tables = set(inspect(connection).get_table_names())
     if "alembic_version" not in tables and "users" in tables:
-        log.info("Обнаружена база версии 0.1.0, отмечаю базовую ревизию %s", BASELINE)
+        log.info(ts("Обнаружена база версии 0.1.0, отмечаю базовую ревизию %s"), BASELINE)
         command.stamp(config, BASELINE)
     before = current_revision(connection)
     command.upgrade(config, "head")
     after = current_revision(connection)
     if before != after:
-        log.info("Схема базы обновлена: %s → %s", before or "пусто", after)
+        log.info(ts("Схема базы обновлена: %s → %s"), before or ts("пусто"), after)
     return after

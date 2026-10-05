@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from opswatch.core.events import EventIn, make_fingerprint
+from opswatch.i18n import tr, ts
 
 REGISTRY: dict[str, type["Connector"]] = {}
 
@@ -27,7 +28,13 @@ class Field:
     group: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        for key in ("label", "help", "placeholder", "group"):
+            if data.get(key):
+                data[key] = tr(data[key])
+        if self.options:
+            data["options"] = [[value, tr(title)] for value, title in self.options]
+        return data
 
 
 @dataclass
@@ -74,9 +81,9 @@ class Connector:
     def describe(cls) -> dict[str, Any]:
         return {
             "type": cls.type,
-            "title": cls.title,
+            "title": tr(cls.title),
             "category": cls.category,
-            "description": cls.description,
+            "description": tr(cls.description),
             "fields": [f.to_dict() for f in cls.fields],
             "passive": cls.passive,
             "supports_checks": cls.supports_checks,
@@ -162,7 +169,7 @@ class Connector:
 
     async def test(self) -> PollResult:
         result = await self.poll()
-        return PollResult(metrics=result.metrics, message=result.message or "Проверка прошла успешно")
+        return PollResult(metrics=result.metrics, message=result.message or ts("Проверка прошла успешно"))
 
     def maintenance_cron(self) -> str:
         return ""

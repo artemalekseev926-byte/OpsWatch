@@ -9,6 +9,7 @@ from typing import Any
 from opswatch.connectors.base import Connector, ConnectorError, Field, PollResult, register
 from opswatch.connectors.onec import find_platform_bin
 from opswatch.core.events import EventIn
+from opswatch.i18n import ts
 
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 EMPTY_UUID = "00000000-0000-0000-0000-000000000000"
@@ -115,13 +116,13 @@ class OneCClusterConnector(Connector):
                 creationflags=CREATE_NO_WINDOW,
             )
         except FileNotFoundError as exc:
-            raise ConnectorError("Не найдена утилита rac. Укажите путь к rac.exe из каталога платформы 1С") from exc
+            raise ConnectorError(ts("Не найдена утилита rac. Укажите путь к rac.exe из каталога платформы 1С")) from exc
         except subprocess.TimeoutExpired as exc:
-            raise ConnectorError("Сервер администрирования RAS не ответил вовремя") from exc
+            raise ConnectorError(ts("Сервер администрирования RAS не ответил вовремя")) from exc
         output = decode_output(result.stdout)
         if result.returncode != 0:
             error = (decode_output(result.stderr) or output).strip()
-            raise ConnectorError(f"rac: {error[-500:] or 'код ' + str(result.returncode)}")
+            raise ConnectorError(ts("rac: {error}", error=error[-500:] or ts("код {code}", code=result.returncode)))
         return output
 
     async def rac(self, *args: str) -> list[dict[str, str]]:
@@ -133,7 +134,7 @@ class OneCClusterConnector(Connector):
         if name:
             clusters = [c for c in clusters if c.get("name", "").lower() == name or c.get("cluster") == name]
             if not clusters:
-                raise ConnectorError(f"Кластер «{self.option('cluster_name')}» не найден")
+                raise ConnectorError(ts("Кластер «{option}» не найден", option=self.option('cluster_name')))
         return clusters
 
     async def snapshot(self) -> dict[str, Any]:
@@ -159,7 +160,7 @@ class OneCClusterConnector(Connector):
         return {"clusters": clusters, "sessions": sessions, "processes": processes, "infobases": infobase_names}
 
     def session_label(self, session: dict[str, str]) -> str:
-        user = session.get("user-name") or "без имени"
+        user = session.get("user-name") or ts("без имени")
         host = session.get("host") or ""
         return f"{user}{' @ ' + host if host else ''}, {session.get('_infobase') or '—'}"
 
@@ -180,15 +181,15 @@ class OneCClusterConnector(Connector):
                 lock_waits.append((blocker, session))
         for duration, session in sorted(long_calls, key=lambda item: -item[0])[:MAX_SESSION_EVENTS]:
             fp = self.fingerprint("call", session.get("session"))
-            details = [f"Длительность: {duration // 1000} сек"]
+            details = [ts("Длительность: {value} сек", value=duration // 1000)]
             if session.get("app-id"):
-                details.append(f"Приложение: {session['app-id']}")
+                details.append(ts("Приложение: {app_id}", app_id=session['app-id']))
             if session.get("current-service-name"):
-                details.append(f"Сервис: {session['current-service-name']}")
+                details.append(ts("Сервис: {current_service_name}", current_service_name=session['current-service-name']))
             if session.get("db-proc-info"):
-                details.append(f"СУБД: {session['db-proc-info']}")
+                details.append(ts("СУБД: {db_proc_info}", db_proc_info=session['db-proc-info']))
             active[fp] = self.event(
-                title=f"Долгий серверный вызов: {self.session_label(session)}",
+                title=ts("Долгий серверный вызов: {session_label}", session_label=self.session_label(session)),
                 message="\n".join(details),
                 severity="warning",
                 type="onec.cluster.long_call",
@@ -198,11 +199,11 @@ class OneCClusterConnector(Connector):
         for blocker, session in lock_waits[:MAX_SESSION_EVENTS]:
             fp = self.fingerprint("lock", session.get("session"))
             other = sessions_by_id.get(str(blocker))
-            culprit = self.session_label(other) if other else f"сеанс {blocker}"
-            kind = "СУБД" if to_int(session.get("blocked-by-dbms")) else "управляемой блокировке"
+            culprit = self.session_label(other) if other else ts("сеанс {blocker}", blocker=blocker)
+            kind = ts("СУБД") if to_int(session.get("blocked-by-dbms")) else ts("управляемой блокировке")
             active[fp] = self.event(
-                title=f"Ожидание на блокировке: {self.session_label(session)}",
-                message=f"Ожидает {kind}, блокирует: {culprit}",
+                title=ts("Ожидание на блокировке: {session_label}", session_label=self.session_label(session)),
+                message=ts("Ожидает {kind}, блокирует: {culprit}", kind=kind, culprit=culprit),
                 severity="warning",
                 type="onec.cluster.lock_wait",
                 fingerprint=fp,
@@ -212,8 +213,8 @@ class OneCClusterConnector(Connector):
         if limit and len(sessions) > limit:
             fp = self.fingerprint("sessions")
             active[fp] = self.event(
-                title=f"{self.ctx.name}: сеансов {len(sessions)} при пороге {limit}",
-                message="Проверьте количество лицензий и зависшие сеансы",
+                title=ts("{name}: сеансов {len} при пороге {limit}", name=self.ctx.name, len=len(sessions), limit=limit),
+                message=ts("Проверьте количество лицензий и зависшие сеансы"),
                 severity="warning",
                 type="onec.cluster.sessions",
                 fingerprint=fp,
@@ -229,7 +230,7 @@ class OneCClusterConnector(Connector):
             if process.get("turned-on") == "yes" and process.get("running") == "no":
                 fp = self.fingerprint("proc-down", process.get("host"), process.get("port"))
                 active[fp] = self.event(
-                    title=f"Рабочий процесс не работает: {name}",
+                    title=ts("Рабочий процесс не работает: {name}", name=name),
                     severity="critical",
                     type="onec.cluster.process_down",
                     fingerprint=fp,
@@ -237,8 +238,8 @@ class OneCClusterConnector(Connector):
             if memory_limit and memory_mb > memory_limit:
                 fp = self.fingerprint("proc-memory", process.get("host"), process.get("port"))
                 active[fp] = self.event(
-                    title=f"Рабочий процесс занимает {memory_mb:.0f} МБ: {name}",
-                    message=f"Порог {memory_limit} МБ",
+                    title=ts("Рабочий процесс занимает {memory_mb:.0f} МБ: {name}", memory_mb=memory_mb, name=name),
+                    message=ts("Порог {memory_limit} МБ", memory_limit=memory_limit),
                     severity="warning",
                     type="onec.cluster.process_memory",
                     fingerprint=fp,
@@ -249,8 +250,8 @@ class OneCClusterConnector(Connector):
             if performance_limit and process.get("running") != "no" and performance < performance_limit:
                 fp = self.fingerprint("proc-performance", process.get("host"), process.get("port"))
                 active[fp] = self.event(
-                    title=f"Низкая производительность ({performance}): {name}",
-                    message=f"Порог {performance_limit}",
+                    title=ts("Низкая производительность ({performance}): {name}", performance=performance, name=name),
+                    message=ts("Порог {performance_limit}", performance_limit=performance_limit),
                     severity="warning",
                     type="onec.cluster.process_performance",
                     fingerprint=fp,
@@ -272,7 +273,7 @@ class OneCClusterConnector(Connector):
     async def poll(self) -> PollResult:
         data = await self.snapshot()
         events, state, metrics = self.evaluate(data, dict(self.ctx.state or {}))
-        message = f"Сеансов: {metrics['sessions']}, процессов: {metrics['processes']}"
+        message = ts("Сеансов: {sessions}, процессов: {processes}", sessions=metrics['sessions'], processes=metrics['processes'])
         return PollResult(events=events, metrics=metrics, state=state, message=message)
 
     async def test(self) -> PollResult:
@@ -280,5 +281,5 @@ class OneCClusterConnector(Connector):
         names = ", ".join(c.get("name", "?") for c in data["clusters"])
         return PollResult(
             metrics={"sessions": len(data["sessions"]), "processes": len(data["processes"])},
-            message=f"Кластеры: {names}; баз: {len(data['infobases'])}, сеансов: {len(data['sessions'])}, рабочих процессов: {len(data['processes'])}",
+            message=ts("Кластеры: {names}; баз: {bases}, сеансов: {sessions}, рабочих процессов: {processes}", names=names, bases=len(data['infobases']), sessions=len(data['sessions']), processes=len(data['processes'])),
         )

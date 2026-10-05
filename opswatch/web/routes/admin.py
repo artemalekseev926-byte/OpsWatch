@@ -13,7 +13,7 @@ from opswatch.connectors import get_connector_class
 from opswatch.constants import CATEGORIES, PERMISSIONS, SEVERITIES
 from opswatch.core.render import PLACEHOLDERS, TEMPLATE_KINDS, default_template, render_notification, sample_event, validate_template
 from opswatch.core.scheduler import next_cron_run, validate_cron
-from opswatch.i18n import LANGUAGES
+from opswatch.i18n import LANGUAGES, tr
 from opswatch.models import AuthSession, BackupJob, BackupRecord, Role, Rule, Source, Subscription, User
 from opswatch.security import hash_password
 from opswatch.services.transfer import describe_url
@@ -91,13 +91,13 @@ async def _apply_job(rt, job: BackupJob, data: JobIn) -> None:
     try:
         validate_cron(data.schedule)
     except ValueError as exc:
-        raise HTTPException(422, f"Расписание: {exc}") from exc
+        raise HTTPException(422, tr("Расписание: {exc}", exc=exc)) from exc
     async with rt.db.session() as session:
         source = await session.get(Source, data.source_id)
     if source is None:
-        raise HTTPException(422, "Источник не найден")
+        raise HTTPException(422, tr("Источник не найден"))
     if not get_connector_class(source.type).supports_backup:
-        raise HTTPException(422, "Этот тип источника не поддерживает резервное копирование")
+        raise HTTPException(422, tr("Этот тип источника не поддерживает резервное копирование"))
     job.name = data.name.strip()
     job.source_id = data.source_id
     job.schedule = data.schedule.strip()
@@ -107,7 +107,7 @@ async def _apply_job(rt, job: BackupJob, data: JobIn) -> None:
     if data.password and data.password != MASK:
         job.password = rt.crypto.encrypt(data.password)
     if job.encrypt and not job.password:
-        raise HTTPException(422, "Укажите пароль для шифрования архива")
+        raise HTTPException(422, tr("Укажите пароль для шифрования архива"))
     job.options = data.options
     job.destinations = data.destinations
 
@@ -130,7 +130,7 @@ async def update_job(job_id: int, data: JobIn, user: User = Depends(require("bac
     async with rt.db.session() as session:
         job = await session.get(BackupJob, job_id)
         if job is None:
-            raise HTTPException(404, "Задание не найдено")
+            raise HTTPException(404, tr("Задание не найдено"))
         await _apply_job(rt, job, data)
         await session.commit()
         await session.refresh(job)
@@ -144,7 +144,7 @@ async def delete_job(job_id: int, user: User = Depends(require("backups.manage")
     async with rt.db.session() as session:
         job = await session.get(BackupJob, job_id)
         if job is None:
-            raise HTTPException(404, "Задание не найдено")
+            raise HTTPException(404, tr("Задание не найдено"))
         await session.delete(job)
         await session.commit()
     await rt.scheduler.sync()
@@ -154,7 +154,7 @@ async def delete_job(job_id: int, user: User = Depends(require("backups.manage")
 @router.post("/backups/jobs/{job_id}/run")
 async def run_job(job_id: int, user: User = Depends(require("backups.manage")), rt=Depends(get_rt)):
     if rt.backups.is_running(job_id):
-        raise HTTPException(409, "Бэкап уже выполняется")
+        raise HTTPException(409, tr("Бэкап уже выполняется"))
     asyncio.create_task(rt.backups.run(job_id, manual=True))
     await asyncio.sleep(0.05)
     return {"started": True}
@@ -175,7 +175,7 @@ async def download_record(record_id: int, user: User = Depends(require("backups.
     async with rt.db.session() as session:
         record = await session.get(BackupRecord, record_id)
     if record is None or not record.file_path or record.deleted or not Path(record.file_path).exists():
-        raise HTTPException(404, "Файл недоступен")
+        raise HTTPException(404, tr("Файл недоступен"))
     return FileResponse(record.file_path, filename=Path(record.file_path).name, media_type="application/zip")
 
 
@@ -184,7 +184,7 @@ async def delete_record(record_id: int, user: User = Depends(require("backups.ma
     async with rt.db.session() as session:
         record = await session.get(BackupRecord, record_id)
         if record is None:
-            raise HTTPException(404, "Запись не найдена")
+            raise HTTPException(404, tr("Запись не найдена"))
         if record.file_path:
             Path(record.file_path).unlink(missing_ok=True)
         record.deleted = True
@@ -194,9 +194,9 @@ async def delete_record(record_id: int, user: User = Depends(require("backups.ma
 
 def _validate_rule(data: RuleIn) -> None:
     if data.min_severity not in SEVERITIES:
-        raise HTTPException(422, "Неизвестный уровень важности")
+        raise HTTPException(422, tr("Неизвестный уровень важности"))
     if any(c not in CATEGORIES for c in data.categories):
-        raise HTTPException(422, "Неизвестная категория")
+        raise HTTPException(422, tr("Неизвестная категория"))
 
 
 @router.get("/rules")
@@ -223,7 +223,7 @@ async def update_rule(rule_id: int, data: RuleIn, user: User = Depends(require("
     async with rt.db.session() as session:
         rule = await session.get(Rule, rule_id)
         if rule is None:
-            raise HTTPException(404, "Правило не найдено")
+            raise HTTPException(404, tr("Правило не найдено"))
         for key, value in data.model_dump().items():
             setattr(rule, key, value)
         await session.commit()
@@ -236,7 +236,7 @@ async def delete_rule(rule_id: int, user: User = Depends(require("rules.manage")
     async with rt.db.session() as session:
         rule = await session.get(Rule, rule_id)
         if rule is None:
-            raise HTTPException(404, "Правило не найдено")
+            raise HTTPException(404, tr("Правило не найдено"))
         await session.delete(rule)
         await session.commit()
     return {"ok": True}
@@ -264,16 +264,16 @@ async def update_user(user_id: int, data: UserUpdate, admin: User = Depends(requ
     async with rt.db.session() as session:
         target = await session.get(User, user_id)
         if target is None:
-            raise HTTPException(404, "Пользователь не найден")
+            raise HTTPException(404, tr("Пользователь не найден"))
         changes = data.model_dump(exclude_unset=True)
         if target.is_superuser and ("status" in changes or "role_id" in changes) and target.id != admin.id:
-            raise HTTPException(403, "Нельзя изменить статус или роль главного администратора")
+            raise HTTPException(403, tr("Нельзя изменить статус или роль главного администратора"))
         if target.is_superuser and changes.get("status") not in (None, "active"):
-            raise HTTPException(403, "Главного администратора нельзя заблокировать")
+            raise HTTPException(403, tr("Главного администратора нельзя заблокировать"))
         if "status" in changes and changes["status"] not in ("pending", "active", "blocked"):
-            raise HTTPException(422, "Неизвестный статус")
+            raise HTTPException(422, tr("Неизвестный статус"))
         if "role_id" in changes and changes["role_id"] is not None and await session.get(Role, changes["role_id"]) is None:
-            raise HTTPException(422, "Роль не найдена")
+            raise HTTPException(422, tr("Роль не найдена"))
         for key, value in changes.items():
             setattr(target, key, value)
         if target.status == "blocked":
@@ -290,13 +290,13 @@ async def approve_user(user_id: int, data: ApproveIn, admin: User = Depends(requ
         target = await session.get(User, user_id)
         role = await session.get(Role, data.role_id)
         if target is None or role is None:
-            raise HTTPException(404, "Пользователь или роль не найдены")
+            raise HTTPException(404, tr("Пользователь или роль не найдены"))
         target.status = "active"
         target.role_id = role.id
         await session.commit()
         await session.refresh(target)
         result = user_dict(target)
-    await _notify_user(rt, target, f"✅ Ваша учётная запись OpsWatch подтверждена. Роль: <b>{role.title}</b>.")
+    await _notify_user(rt, target, tr("✅ Ваша учётная запись OpsWatch подтверждена. Роль: <b>{title}</b>.", title=role.title))
     return result
 
 
@@ -305,9 +305,9 @@ async def reject_user(user_id: int, admin: User = Depends(require("users.manage"
     async with rt.db.session() as session:
         target = await session.get(User, user_id)
         if target is None:
-            raise HTTPException(404, "Пользователь не найден")
+            raise HTTPException(404, tr("Пользователь не найден"))
         if target.status != "pending":
-            raise HTTPException(409, "Отклонить можно только новую заявку")
+            raise HTTPException(409, tr("Отклонить можно только новую заявку"))
         await session.delete(target)
         await session.commit()
     return {"ok": True}
@@ -320,9 +320,9 @@ async def reset_password(
     async with rt.db.session() as session:
         target = await session.get(User, user_id)
         if target is None:
-            raise HTTPException(404, "Пользователь не найден")
+            raise HTTPException(404, tr("Пользователь не найден"))
         if target.is_superuser and target.id != admin.id and not admin.is_superuser:
-            raise HTTPException(403, "Недостаточно прав")
+            raise HTTPException(403, tr("Недостаточно прав"))
         target.password_hash = hash_password(data.password)
         await session.execute(delete(AuthSession).where(AuthSession.user_id == target.id))
         await session.commit()
@@ -334,9 +334,9 @@ async def delete_user(user_id: int, admin: User = Depends(require("users.manage"
     async with rt.db.session() as session:
         target = await session.get(User, user_id)
         if target is None:
-            raise HTTPException(404, "Пользователь не найден")
+            raise HTTPException(404, tr("Пользователь не найден"))
         if target.is_superuser or target.id == admin.id:
-            raise HTTPException(403, "Этого пользователя нельзя удалить")
+            raise HTTPException(403, tr("Этого пользователя нельзя удалить"))
         await session.execute(delete(Subscription).where(Subscription.user_id == target.id))
         await session.delete(target)
         await session.commit()
@@ -358,7 +358,7 @@ def _clean_permissions(values: list[str]) -> list[str]:
 async def create_role(data: RoleIn, user: User = Depends(require("users.manage")), rt=Depends(get_rt)):
     async with rt.db.session() as session:
         if await session.scalar(select(Role).where(Role.name == data.name)):
-            raise HTTPException(409, "Роль с таким кодом уже есть")
+            raise HTTPException(409, tr("Роль с таким кодом уже есть"))
         role = Role(name=data.name, title=data.title, permissions=_clean_permissions(data.permissions), builtin=False)
         session.add(role)
         await session.commit()
@@ -371,9 +371,9 @@ async def update_role(role_id: int, data: RoleIn, user: User = Depends(require("
     async with rt.db.session() as session:
         role = await session.get(Role, role_id)
         if role is None:
-            raise HTTPException(404, "Роль не найдена")
+            raise HTTPException(404, tr("Роль не найдена"))
         if role.name == "admin":
-            raise HTTPException(403, "Роль администратора не редактируется")
+            raise HTTPException(403, tr("Роль администратора не редактируется"))
         role.title = data.title
         role.permissions = _clean_permissions(data.permissions)
         if not role.builtin:
@@ -388,9 +388,9 @@ async def delete_role(role_id: int, user: User = Depends(require("users.manage")
     async with rt.db.session() as session:
         role = await session.get(Role, role_id)
         if role is None:
-            raise HTTPException(404, "Роль не найдена")
+            raise HTTPException(404, tr("Роль не найдена"))
         if role.builtin:
-            raise HTTPException(403, "Встроенную роль нельзя удалить")
+            raise HTTPException(403, tr("Встроенную роль нельзя удалить"))
         await session.delete(role)
         await session.commit()
     return {"ok": True}
@@ -425,11 +425,11 @@ class TemplateIn(BaseModel):
 
 def _check_template(data: TemplateIn) -> None:
     if data.lang not in LANGUAGES or data.kind not in TEMPLATE_KINDS:
-        raise HTTPException(422, "Неизвестный язык или вид шаблона")
+        raise HTTPException(422, tr("Неизвестный язык или вид шаблона"))
 
 
 def _preview(data: TemplateIn, user: User) -> str:
-    event = sample_event()
+    event = sample_event(data.lang)
     if data.kind == "resolved":
         event.status = "resolved"
     return render_notification(
@@ -454,7 +454,7 @@ async def get_templates(user: User = Depends(require("settings.manage")), rt=Dep
     return {
         "languages": list(LANGUAGES),
         "kinds": list(TEMPLATE_KINDS),
-        "placeholders": [{"name": k, "title": v} for k, v in PLACEHOLDERS.items()],
+        "placeholders": [{"name": k, "title": tr(v)} for k, v in PLACEHOLDERS.items()],
         "templates": templates,
     }
 
@@ -494,7 +494,7 @@ async def test_template(data: TemplateIn, user: User = Depends(require("settings
         elif user.telegram_chat_id and rt.bot.available:
             await rt.bot.send_text(user.telegram_chat_id, text)
         else:
-            raise HTTPException(400, "Telegram не привязан или бот не запущен")
+            raise HTTPException(400, tr("Telegram не привязан или бот не запущен"))
     except HTTPException:
         raise
     except Exception as exc:

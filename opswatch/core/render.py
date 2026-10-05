@@ -64,9 +64,12 @@ def truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def fmt_time(value) -> str:
+TIME_FORMATS = {"ru": "%d.%m.%Y %H:%M", "en": "%Y-%m-%d %H:%M"}
+
+
+def fmt_time(value, lang: str = "ru") -> str:
     local = to_local(value)
-    return local.strftime("%d.%m.%Y %H:%M") if local else ""
+    return local.strftime(TIME_FORMATS.get(lang, TIME_FORMATS["ru"])) if local else ""
 
 
 def default_template(kind: str, lang: str = "ru") -> str:
@@ -85,7 +88,7 @@ def template_context(
     meta = []
     if event.source_name:
         meta.append(tr("Источник: {name}", lang, name=esc(event.source_name)))
-    meta.append(fmt_time(event.created_at))
+    meta.append(fmt_time(event.created_at, lang))
     if (event.count or 1) > 1:
         meta.append(tr("Повторов: {count}", lang, count=event.count))
     status_line = ""
@@ -96,7 +99,7 @@ def template_context(
     resolved_meta = []
     if resolved_by:
         resolved_meta.append(tr("Закрыл: {name}", lang, name=esc(resolved_by)))
-    resolved_meta.append(fmt_time(event.resolved_at))
+    resolved_meta.append(fmt_time(event.resolved_at, lang))
     link = f"{public_url.rstrip('/')}/#/event/{event.id}" if public_url else ""
     return {
         "icon": SEVERITY_ICONS.get(event.severity, "⚪"),
@@ -106,8 +109,8 @@ def template_context(
         "title": esc(truncate(event.title, 300)),
         "message": esc(truncate(event.message or "", 1800)),
         "source": esc(event.source_name or ""),
-        "time": fmt_time(event.created_at),
-        "last_time": fmt_time(event.last_seen_at),
+        "time": fmt_time(event.created_at, lang),
+        "last_time": fmt_time(event.last_seen_at, lang),
         "count": str(event.count or 1),
         "type": esc(event.type),
         "id": str(event.id),
@@ -116,7 +119,7 @@ def template_context(
         "status_line": status_line,
         "resolution": esc(truncate(event.resolution or "", 1000)),
         "resolved_by": esc(resolved_by),
-        "resolved_time": fmt_time(event.resolved_at),
+        "resolved_time": fmt_time(event.resolved_at, lang),
         "resolved_meta": " · ".join(m for m in resolved_meta if m),
         "link": esc(link),
     }
@@ -163,14 +166,14 @@ def validate_template(template: str) -> list[str]:
     checker.close()
     problems = []
     if checker.errors:
-        problems.append("Недопустимые или непарные теги: " + ", ".join(checker.errors[:5]))
+        problems.append(tr("Недопустимые или непарные теги: {tags}", tags=", ".join(checker.errors[:5])))
     if checker.stack:
-        problems.append("Незакрытые теги: " + ", ".join(f"<{t}>" for t in checker.stack))
+        problems.append(tr("Незакрытые теги: {tags}", tags=", ".join(f"<{t}>" for t in checker.stack)))
     if len(template) > 3000:
-        problems.append("Шаблон длиннее 3000 символов")
+        problems.append(tr("Шаблон длиннее 3000 символов"))
     unknown = sorted({n for n in _PLACEHOLDER.findall(template) if n not in PLACEHOLDERS and n != "resolved_meta"})
     if unknown:
-        problems.append("Неизвестные подстановки: " + ", ".join("{" + n + "}" for n in unknown))
+        problems.append(tr("Неизвестные подстановки: {names}", names=", ".join("{" + n + "}" for n in unknown)))
     return problems
 
 
@@ -206,8 +209,8 @@ def render_details(event: Event, public_url: str = "", lang: str = "ru") -> str:
     ]
     if event.source_name:
         lines.append(tr("Источник: {name}", lang, name=esc(event.source_name)))
-    lines.append(tr("Впервые: {value}", lang, value=fmt_time(event.created_at)))
-    lines.append(tr("Последний раз: {value}", lang, value=fmt_time(event.last_seen_at)))
+    lines.append(tr("Впервые: {value}", lang, value=fmt_time(event.created_at, lang)))
+    lines.append(tr("Последний раз: {value}", lang, value=fmt_time(event.last_seen_at, lang)))
     lines.append(tr("Повторов: {count}", lang, count=event.count))
     if event.message:
         lines.append("")
@@ -239,7 +242,7 @@ def link_keyboard(public_url: str, event: Event, lang: str = "ru") -> Keyboard:
     return [[{"text": tr("Открыть в OpsWatch", lang), "url": f"{public_url.rstrip('/')}/#/event/{event.id}"}]]
 
 
-def sample_event() -> Event:
+def sample_event(lang: str | None = None) -> Event:
     from opswatch.db import utcnow
 
     now = utcnow()
@@ -251,11 +254,11 @@ def sample_event() -> Event:
         category="database",
         type="check.threshold",
         severity="critical",
-        title="Ошибки в очереди заданий: 9 > 3",
-        message="Текущее значение: 9\nПорог: > 3",
+        title=tr("Ошибки в очереди заданий: 9 > 3", lang),
+        message=tr("Текущее значение: 9\nПорог: > 3", lang),
         count=3,
         status="new",
-        resolution="Перезапустили службу обмена",
+        resolution=tr("Перезапустили службу обмена", lang),
         resolved_at=now,
         details={},
     )

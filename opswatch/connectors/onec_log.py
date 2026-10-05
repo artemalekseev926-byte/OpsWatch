@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from opswatch.i18n import ts
+
 LEVELS = ("info", "warning", "error", "note")
 LEVEL_RANK = {"note": 0, "info": 0, "warning": 1, "error": 2}
 LETTER_LEVEL = {"I": "info", "W": "warning", "E": "error", "N": "note"}
@@ -56,7 +58,8 @@ class LogEntry:
 
     @property
     def event_title(self) -> str:
-        return EVENT_NAMES.get(self.event, self.event)
+        name = EVENT_NAMES.get(self.event)
+        return ts(name) if name else self.event
 
 
 def level_at_least(level: str, minimum: str) -> bool:

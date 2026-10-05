@@ -6,6 +6,7 @@ from urllib.parse import unquote, urlparse
 
 from opswatch.connectors.base import Connector, ConnectorError, Field, PollResult, register
 from opswatch.connectors.checks import ensure_read_only, json_value, run_checks
+from opswatch.i18n import ts
 from opswatch.sizes import human_size
 
 ROW_LIMIT = 1000
@@ -53,7 +54,7 @@ class SqlConnector(Connector):
         if dsn:
             parsed = urlparse(dsn)
             if self.schemes and parsed.scheme.split("+")[0] not in self.schemes:
-                raise ConnectorError(f"Строка подключения должна начинаться с {self.schemes[0]}://")
+                raise ConnectorError(ts("Строка подключения должна начинаться с {value}://", value=self.schemes[0]))
             return {
                 "host": parsed.hostname or "127.0.0.1",
                 "port": parsed.port or self.default_port,
@@ -89,7 +90,7 @@ class SqlConnector(Connector):
         except ConnectorError:
             raise
         except asyncio.TimeoutError as exc:
-            raise ConnectorError("Превышено время ожидания ответа от сервера") from exc
+            raise ConnectorError(ts("Превышено время ожидания ответа от сервера")) from exc
         except Exception as exc:
             raise ConnectorError(f"{type(exc).__name__}: {exc}") from exc
         return version, size
@@ -104,8 +105,8 @@ class SqlConnector(Connector):
             if size > warn_mb * 1024 * 1024:
                 events.append(
                     self.event(
-                        title=f"{self.ctx.name}: размер базы {human_size(size)}",
-                        message=f"Превышен порог {warn_mb} МБ",
+                        title=ts("{name}: размер базы {human_size}", name=self.ctx.name, human_size=human_size(size)),
+                        message=ts("Превышен порог {warn_mb} МБ", warn_mb=warn_mb),
                         severity="warning",
                         type="db.size",
                         fingerprint=size_fp,
@@ -125,7 +126,7 @@ class SqlConnector(Connector):
         version, size = await self._probe()
         return PollResult(
             metrics={"version": version, "size": size, "size_human": human_size(size)},
-            message=f"Подключение успешно: {version}, размер {human_size(size)}",
+            message=ts("Подключение успешно: {version}, размер {human_size}", version=version, human_size=human_size(size)),
         )
 
     async def run_check_preview(self, check: dict[str, Any]) -> list[dict[str, Any]]:

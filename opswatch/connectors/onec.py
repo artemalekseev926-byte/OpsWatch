@@ -14,6 +14,7 @@ import httpx
 from opswatch.connectors.base import Connector, ConnectorError, Field, PollResult, register
 from opswatch.connectors.onec_log import find_log_folder, level_at_least, read_log
 from opswatch.connectors.sql import CHECKS_FIELD, MSSQLConnector, PostgresConnector, human_size
+from opswatch.i18n import ts
 
 LOG_LEVEL_OPTIONS = [["error", "Только ошибки"], ["warning", "Ошибки и предупреждения"]]
 LOG_SEVERITY_OPTIONS = [["warning", "Предупреждение"], ["critical", "Критично"]]
@@ -93,17 +94,17 @@ def log_events(connector: Connector, folder: Path, state: dict[str, Any]) -> tup
     matched = [e for e in entries if level_at_least(e.level, min_level)]
     events = []
     for entry in matched[:MAX_LOG_EVENTS]:
-        title = f"Журнал 1С: {entry.event_title or 'событие'}"
+        title = ts("Журнал 1С: {value}", value=entry.event_title or ts("событие"))
         lines = []
         if entry.comment:
             lines.append(entry.comment)
         if entry.data:
-            lines.append(f"Данные: {entry.data}")
+            lines.append(ts("Данные: {data}", data=entry.data))
         who = ", ".join(x for x in (entry.user, entry.computer, entry.application) if x)
         if who:
-            lines.append(f"Кто: {who}")
+            lines.append(ts("Кто: {who}", who=who))
         if entry.time:
-            lines.append(f"Время: {entry.time:%d.%m.%Y %H:%M:%S}")
+            lines.append(ts("Время: {time:%d.%m.%Y %H:%M:%S}", time=entry.time))
         events.append(
             connector.event(
                 title=title,
@@ -117,7 +118,7 @@ def log_events(connector: Connector, folder: Path, state: dict[str, Any]) -> tup
     if len(matched) > MAX_LOG_EVENTS:
         events.append(
             connector.event(
-                title=f"Журнал 1С: ещё {len(matched) - MAX_LOG_EVENTS} записей",
+                title=ts("Журнал 1С: ещё {value} записей", value=len(matched) - MAX_LOG_EVENTS),
                 severity=severity,
                 type="onec.log.summary",
                 fingerprint=connector.fingerprint("log-summary"),
@@ -194,12 +195,12 @@ class OneCFileConnector(Connector):
     def _inspect(self) -> dict[str, Any]:
         folder = self.folder
         if not str(self.option("path", "")).strip():
-            raise ConnectorError("Не указан каталог базы")
+            raise ConnectorError(ts("Не указан каталог базы"))
         if not folder.exists():
-            raise ConnectorError(f"Каталог базы недоступен: {folder}")
+            raise ConnectorError(ts("Каталог базы недоступен: {folder}", folder=folder))
         db_file = self.db_file
         if not db_file.exists():
-            raise ConnectorError(f"Файл базы 1Cv8.1CD не найден в {folder}")
+            raise ConnectorError(ts("Файл базы 1Cv8.1CD не найден в {folder}", folder=folder))
         stat = db_file.stat()
         return {
             "size": stat.st_size,
@@ -218,8 +219,8 @@ class OneCFileConnector(Connector):
             if metrics["size"] > warn_mb * 1024 * 1024:
                 events.append(
                     self.event(
-                        title=f"{self.ctx.name}: размер базы {metrics['size_human']}",
-                        message=f"Превышен порог {warn_mb} МБ",
+                        title=ts("{name}: размер базы {size_human}", name=self.ctx.name, size_human=metrics['size_human']),
+                        message=ts("Превышен порог {warn_mb} МБ", warn_mb=warn_mb),
                         type="onec.size",
                         fingerprint=size_fp,
                     )
@@ -232,15 +233,15 @@ class OneCFileConnector(Connector):
                 log_events_list, state, count = await asyncio.to_thread(log_events, self, log_folder, state)
                 events += log_events_list
                 metrics["log_matches"] = count
-        users = "есть пользователи" if metrics["in_use"] else "пользователей нет"
+        users = ts("есть пользователи") if metrics["in_use"] else ts("пользователей нет")
         return PollResult(events=events, metrics=metrics, state=state, message=f"{metrics['size_human']}, {users}")
 
     async def test(self) -> PollResult:
         metrics = await asyncio.to_thread(self._inspect)
         log_folder = find_log_folder(self.folder)
-        log_text = f", журнал: {log_folder.name}" if log_folder else ", журнал не найден"
-        users = "в базе работают пользователи" if metrics["in_use"] else "база свободна"
-        return PollResult(metrics=metrics, message=f"База найдена: {metrics['size_human']}, {users}{log_text}")
+        log_text = ts(", журнал: {name}", name=log_folder.name) if log_folder else ts(", журнал не найден")
+        users = ts("в базе работают пользователи") if metrics["in_use"] else ts("база свободна")
+        return PollResult(metrics=metrics, message=ts("База найдена: {size_human}, {users}{log_text}", size_human=metrics['size_human'], users=users, log_text=log_text))
 
     def maintenance_cron(self) -> str:
         if self.option("integrity_tool", "none") == "none":
@@ -251,7 +252,7 @@ class OneCFileConnector(Connector):
         tool = self.option("integrity_tool", "none")
         bin_dir = find_platform_bin(str(self.option("platform_path", "") or ""))
         if bin_dir is None:
-            raise ConnectorError("Не найден каталог платформы 1С, укажите его в настройках источника")
+            raise ConnectorError(ts("Не найден каталог платформы 1С, укажите его в настройках источника"))
         if tool == "designer":
             exe = bin_dir / ("1cv8.exe" if sys.platform == "win32" else "1cv8")
             command = [
@@ -282,13 +283,13 @@ class OneCFileConnector(Connector):
             return PollResult(
                 events=[
                     self.event(
-                        title=f"{self.ctx.name}: проверка целостности пропущена",
-                        message="В базе работают пользователи — проверка перенесена на следующий запуск",
+                        title=ts("{name}: проверка целостности пропущена", name=self.ctx.name),
+                        message=ts("В базе работают пользователи — проверка перенесена на следующий запуск"),
                         severity="info",
                         type="onec.integrity.skipped",
                     )
                 ],
-                message="Пропущено: база занята",
+                message=ts("Пропущено: база занята"),
             )
         with tempfile.TemporaryDirectory() as tmp:
             out_file = Path(tmp) / "check.log"
@@ -306,20 +307,20 @@ class OneCFileConnector(Connector):
             output = (output or result.stdout.decode(errors="replace") + result.stderr.decode(errors="replace")).strip()
         if result.returncode == 0:
             return PollResult(
-                events=[self.resolved(fp, message="Проверка целостности пройдена")],
-                message="Проверка целостности пройдена",
+                events=[self.resolved(fp, message=ts("Проверка целостности пройдена"))],
+                message=ts("Проверка целостности пройдена"),
             )
         return PollResult(
             events=[
                 self.event(
-                    title=f"{self.ctx.name}: проверка целостности выявила ошибки",
-                    message=output[-1500:] or f"Код возврата {result.returncode}",
+                    title=ts("{name}: проверка целостности выявила ошибки", name=self.ctx.name),
+                    message=output[-1500:] or ts("Код возврата {returncode}", returncode=result.returncode),
                     severity="critical",
                     type="onec.integrity.failed",
                     fingerprint=fp,
                 )
             ],
-            message=f"Ошибка, код {result.returncode}",
+            message=ts("Ошибка, код {returncode}", returncode=result.returncode),
         )
 
 
@@ -405,11 +406,11 @@ class OneCServerConnector(Connector):
         if self.option("http_url"):
             metrics["http"] = http_message
             if ok:
-                events.append(self.resolved(http_fp, message="HTTP-сервис снова доступен"))
+                events.append(self.resolved(http_fp, message=ts("HTTP-сервис снова доступен")))
             else:
                 events.append(
                     self.event(
-                        title=f"{self.ctx.name}: HTTP/OData-сервис недоступен",
+                        title=ts("{name}: HTTP/OData-сервис недоступен", name=self.ctx.name),
                         message=http_message,
                         severity="critical",
                         type="onec.http.down",
@@ -422,7 +423,7 @@ class OneCServerConnector(Connector):
             if folder is None:
                 events.append(
                     self.event(
-                        title=f"{self.ctx.name}: журнал регистрации не найден",
+                        title=ts("{name}: журнал регистрации не найден", name=self.ctx.name),
                         message=log_path,
                         severity="warning",
                         type="onec.log.missing",
@@ -442,8 +443,8 @@ class OneCServerConnector(Connector):
         message = result.message
         ok, http_message = await self.http_probe()
         if self.option("http_url"):
-            message += f"; HTTP: {'доступен' if ok else 'ошибка'} ({http_message})"
+            message += ts("; HTTP: {state} ({details})", state=ts("доступен") if ok else ts("ошибка"), details=http_message)
         if self.option("log_path"):
             folder = find_log_folder(Path(str(self.option("log_path"))))
-            message += "; журнал найден" if folder else "; журнал не найден"
+            message += ts("; журнал найден") if folder else ts("; журнал не найден")
         return PollResult(metrics=result.metrics, message=message)

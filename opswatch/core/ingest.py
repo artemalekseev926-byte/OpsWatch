@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from opswatch.core.events import EventIn, normalize_severity
+from opswatch.i18n import ts
 
 ZABBIX_NAMED = {
     "not classified": "info",
@@ -41,7 +42,7 @@ def parse_zabbix(payload: dict[str, Any], source_id: int | None, source_name: st
     host = _first(data, "host", "host_name", "hostname", default="")
     trigger = _first(data, "trigger_name", "trigger", "event_name", "name", default="")
     subject = _first(data, "subject", "title", default="")
-    title = trigger or subject or "Событие Zabbix"
+    title = trigger or subject or ts("Событие Zabbix")
     if host and host not in title:
         title = f"{host}: {title}"
     message = _first(data, "message", "text", "opdata", default="")
@@ -125,7 +126,7 @@ def parse_generic(
         title = _first(item, "title", "subject", "name", "summary", default=None)
         message = _first(item, "message", "text", "description", "body", default="")
         if title is None:
-            title = str(message).splitlines()[0][:200] if message else "Событие"
+            title = str(message).splitlines()[0][:200] if message else ts("Событие")
         known = {
             "title", "subject", "name", "summary", "message", "text", "description", "body", "severity", "level",
             "priority", "category", "type", "fingerprint", "id", "external_id", "status", "state", "resolve", "details",

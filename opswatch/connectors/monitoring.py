@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from opswatch.connectors.base import Connector, ConnectorError, Field, PollResult, register
+from opswatch.i18n import ts
 
 ZABBIX_SEVERITY = {0: "info", 1: "info", 2: "warning", 3: "warning", 4: "critical", 5: "critical"}
 ZABBIX_SEVERITY_OPTIONS = [
@@ -40,7 +41,7 @@ class HttpCheckConnector(Connector):
     async def _request(self) -> tuple[httpx.Response, float]:
         url = str(self.option("url", "")).strip()
         if not url:
-            raise ConnectorError("Не указан URL")
+            raise ConnectorError(ts("Не указан URL"))
         auth = None
         if self.option("user"):
             auth = (str(self.option("user")), str(self.option("password", "")))
@@ -60,12 +61,12 @@ class HttpCheckConnector(Connector):
         response, latency = await self._request()
         expected = self.int_option("expected_status", 0)
         if expected and response.status_code != expected:
-            raise ConnectorError(f"Код ответа {response.status_code}, ожидался {expected}")
+            raise ConnectorError(ts("Код ответа {status_code}, ожидался {expected}", status_code=response.status_code, expected=expected))
         if not expected and response.status_code >= 400:
-            raise ConnectorError(f"Код ответа {response.status_code}")
+            raise ConnectorError(ts("Код ответа {status_code}", status_code=response.status_code))
         needle = str(self.option("contains", "") or "")
         if needle and needle not in response.text:
-            raise ConnectorError(f"В ответе нет текста «{needle}»")
+            raise ConnectorError(ts("В ответе нет текста «{needle}»", needle=needle))
         events = []
         warn = self.int_option("latency_warn_ms", 0)
         fp = self.fingerprint("latency")
@@ -73,8 +74,8 @@ class HttpCheckConnector(Connector):
             if latency > warn:
                 events.append(
                     self.event(
-                        title=f"{self.ctx.name}: медленный ответ {latency:.0f} мс",
-                        message=f"Порог {warn} мс",
+                        title=ts("{name}: медленный ответ {latency:.0f} мс", name=self.ctx.name, latency=latency),
+                        message=ts("Порог {warn} мс", warn=warn),
                         type="http.slow",
                         fingerprint=fp,
                     )
@@ -82,7 +83,7 @@ class HttpCheckConnector(Connector):
             else:
                 events.append(self.resolved(fp))
         metrics = {"status": response.status_code, "latency_ms": round(latency)}
-        return PollResult(events=events, metrics=metrics, message=f"HTTP {response.status_code}, {latency:.0f} мс")
+        return PollResult(events=events, metrics=metrics, message=ts("HTTP {status_code}, {latency:.0f} мс", status_code=response.status_code, latency=latency))
 
 
 @register
@@ -102,7 +103,7 @@ class ZabbixApiConnector(Connector):
     def endpoint(self) -> str:
         url = str(self.option("url", "")).strip().rstrip("/")
         if not url:
-            raise ConnectorError("Не указан адрес Zabbix")
+            raise ConnectorError(ts("Не указан адрес Zabbix"))
         return url if url.endswith("api_jsonrpc.php") else url + "/api_jsonrpc.php"
 
     async def call(self, method: str, params: dict[str, Any]) -> Any:
@@ -116,7 +117,7 @@ class ZabbixApiConnector(Connector):
                 response = await client.post(self.endpoint(), json=payload, headers=headers)
                 data = response.json()
             except (httpx.HTTPError, ValueError) as exc:
-                raise ConnectorError(f"Zabbix API недоступен: {exc}") from exc
+                raise ConnectorError(ts("Zabbix API недоступен: {exc}", exc=exc)) from exc
             if "error" in data and method != "apiinfo.version":
                 legacy = dict(payload, auth=token)
                 headers.pop("Authorization", None)
@@ -124,7 +125,7 @@ class ZabbixApiConnector(Connector):
                     response = await client.post(self.endpoint(), json=legacy, headers=headers)
                     data = response.json()
                 except (httpx.HTTPError, ValueError) as exc:
-                    raise ConnectorError(f"Zabbix API недоступен: {exc}") from exc
+                    raise ConnectorError(ts("Zabbix API недоступен: {exc}", exc=exc)) from exc
         if "error" in data:
             error = data["error"]
             raise ConnectorError(f"Zabbix API: {error.get('message')} {error.get('data', '')}".strip())
@@ -160,7 +161,7 @@ class ZabbixApiConnector(Connector):
             severity = ZABBIX_SEVERITY.get(int(problem.get("severity", 0)), "warning")
             events.append(
                 self.event(
-                    title=problem.get("name") or "Проблема Zabbix",
+                    title=problem.get("name") or ts("Проблема Zabbix"),
                     message=problem.get("opdata") or "",
                     severity=severity,
                     type="zabbix.problem",
@@ -169,19 +170,19 @@ class ZabbixApiConnector(Connector):
                 )
             )
         for gone in previous - current:
-            resolve = self.resolved(fingerprint="", message="Проблема закрыта в Zabbix")
+            resolve = self.resolved(fingerprint="", message=ts("Проблема закрыта в Zabbix"))
             resolve.fingerprint = None
             resolve.external_id = f"zbx:{gone}"
             events.append(resolve)
         state["open"] = sorted(current)
-        return PollResult(events=events, metrics={"problems": len(current)}, state=state, message=f"Активных проблем: {len(current)}")
+        return PollResult(events=events, metrics={"problems": len(current)}, state=state, message=ts("Активных проблем: {len}", len=len(current)))
 
     async def test(self) -> PollResult:
         version = await self.call("apiinfo.version", {})
         problems = await self.problems()
         return PollResult(
             metrics={"version": version, "problems": len(problems)},
-            message=f"Zabbix {version}, активных проблем: {len(problems)}",
+            message=ts("Zabbix {version}, активных проблем: {len}", version=version, len=len(problems)),
         )
 
 
@@ -191,7 +192,7 @@ class WebhookSource(Connector):
     default_interval = 0
 
     async def test(self) -> PollResult:
-        return PollResult(message="Источник принимает события по webhook — проверьте отправку со стороны системы")
+        return PollResult(message=ts("Источник принимает события по webhook — проверьте отправку со стороны системы"))
 
 
 @register

@@ -3,7 +3,7 @@ import argparse
 import pytest
 
 from opswatch.desktop.launcher import normalize_url, selftest
-from opswatch.desktop.winservice import USAGE
+from opswatch.desktop.winservice import usage
 
 
 def test_normalize_url():
@@ -16,7 +16,7 @@ def test_normalize_url():
 
 def test_service_usage_mentions_commands():
     for command in ("install", "start", "stop", "remove", "run"):
-        assert command in USAGE
+        assert command in usage()
 
 
 def test_selftest_runs_server(tmp_path):

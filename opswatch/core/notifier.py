@@ -8,6 +8,7 @@ from sqlalchemy import select
 from opswatch.core.render import event_keyboard, link_keyboard, render_notification
 from opswatch.core.router import in_quiet_hours
 from opswatch.db import Database
+from opswatch.i18n import ts
 from opswatch.models import Event, Notification, User
 
 log = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ class Notifier:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                log.exception("Ошибка доставки уведомления %s %s", action, item_id)
+                log.exception(ts("Ошибка доставки уведомления %s %s"), action, item_id)
             finally:
                 self.queue.task_done()
 
@@ -151,14 +152,14 @@ class Notifier:
                 except Exception as exc:
                     if text == fallback or "parse" not in str(exc).lower():
                         raise
-                    log.warning("Шаблон уведомления не принят Telegram, отправляю стандартный: %s", exc)
+                    log.warning(ts("Шаблон уведомления не принят Telegram, отправляю стандартный: %s"), exc)
                     message_id = await deliver(fallback)
                 notification.telegram_status = "sent"
                 notification.telegram_chat_id = chat_id
                 notification.telegram_message_id = message_id
                 notification.telegram_via_personal = use_personal
             except Exception as exc:
-                log.warning("Не удалось отправить уведомление пользователю %s: %s", user.username, exc)
+                log.warning(ts("Не удалось отправить уведомление пользователю %s: %s"), user.username, exc)
                 notification.telegram_status = "failed"
             await session.commit()
 
@@ -204,4 +205,4 @@ class Notifier:
                             keyboard=event_keyboard(event, lang),
                         )
                 except Exception as exc:
-                    log.debug("Не удалось обновить сообщение %s: %s", notification.telegram_message_id, exc)
+                    log.debug(ts("Не удалось обновить сообщение %s: %s"), notification.telegram_message_id, exc)

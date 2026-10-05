@@ -6,29 +6,35 @@ from datetime import datetime
 
 from opswatch import APP_NAME, __version__
 from opswatch.config import AppConfig, app_dir
+from opswatch.i18n import tl
 from opswatch.logs import ensure_streams, setup_logging
 
 SERVICE_NAME = "OpsWatch"
 DISPLAY_NAME = "OpsWatch"
 DESCRIPTION = "OpsWatch: мониторинг, резервное копирование и уведомления в Telegram"
 
-USAGE = f"""{APP_NAME} {__version__} — сервер
+USAGE_LINES = [
+    ("run", "запустить сервер в этом окне"),
+    ("install", "установить службу Windows (автозапуск)"),
+    ("start", "запустить службу"),
+    ("stop", "остановить службу"),
+    ("restart", "перезапустить службу"),
+    ("status", "состояние службы"),
+    ("remove", "удалить службу"),
+    ("migrate-db postgresql://user:pass@host/opswatch --write-env", "перенести данные из SQLite в PostgreSQL"),
+    ("reset-password admin1 NewPassword", "сбросить пароль пользователя"),
+]
 
-  OpsWatchServer.exe run        запустить сервер в этом окне
-  OpsWatchServer.exe install    установить службу Windows (автозапуск)
-  OpsWatchServer.exe start      запустить службу
-  OpsWatchServer.exe stop       остановить службу
-  OpsWatchServer.exe restart    перезапустить службу
-  OpsWatchServer.exe status     состояние службы
-  OpsWatchServer.exe remove     удалить службу
 
-  OpsWatchServer.exe migrate-db postgresql://user:pass@host/opswatch --write-env
-                                перенести данные из SQLite в PostgreSQL
-  OpsWatchServer.exe reset-password admin1 НовыйПароль
-
-Команды службы выполняйте от имени администратора.
-Веб-панель: http://<адрес-компьютера>:8765 (логин admin1 / пароль admin1)
-"""
+def usage() -> str:
+    lines = [f"{APP_NAME} {__version__} — " + tl("сервер"), ""]
+    for command, description in USAGE_LINES:
+        lines.append(f"  OpsWatchServer.exe {command}")
+        lines.append(f"      {tl(description)}")
+    lines.append("")
+    lines.append(tl("Команды службы выполняйте от имени администратора."))
+    lines.append(tl("Веб-панель: http://<адрес-компьютера>:8765 (логин admin1 / пароль admin1)"))
+    return "\n".join(lines)
 
 
 def write_service_error(text: str) -> None:
@@ -45,7 +51,7 @@ def run_console() -> int:
 
     config = AppConfig.load()
     setup_logging(config.logs_dir, config.log_level, console=True)
-    print(f"{APP_NAME} запущен: http://127.0.0.1:{config.port}  (Ctrl+C — остановить)")
+    print(tl("{APP_NAME} запущен: http://127.0.0.1:{port}  (Ctrl+C — остановить)", APP_NAME=APP_NAME, port=config.port))
     run_server(config)
     return 0
 
@@ -59,7 +65,7 @@ def _service_class():
     class OpsWatchService(win32serviceutil.ServiceFramework):
         _svc_name_ = SERVICE_NAME
         _svc_display_name_ = DISPLAY_NAME
-        _svc_description_ = DESCRIPTION
+        _svc_description_ = tl(DESCRIPTION)
 
         def __init__(self, args):
             super().__init__(args)
@@ -104,34 +110,34 @@ def manage(command: str) -> int:
                 DISPLAY_NAME,
                 startType=win32service.SERVICE_AUTO_START,
                 exeName=sys.executable,
-                description=DESCRIPTION,
+                description=tl(DESCRIPTION),
             )
-            print("Служба установлена. Запустите её командой: OpsWatchServer.exe start")
+            print(tl("Служба установлена. Запустите её командой: OpsWatchServer.exe start"))
         elif command == "remove":
             try:
                 win32serviceutil.StopService(SERVICE_NAME)
             except Exception:
                 pass
             win32serviceutil.RemoveService(SERVICE_NAME)
-            print("Служба удалена")
+            print(tl("Служба удалена"))
         elif command == "start":
             win32serviceutil.StartService(SERVICE_NAME)
-            print("Служба запускается")
+            print(tl("Служба запускается"))
         elif command == "stop":
             win32serviceutil.StopService(SERVICE_NAME)
-            print("Служба останавливается")
+            print(tl("Служба останавливается"))
         elif command == "restart":
             win32serviceutil.RestartService(SERVICE_NAME)
-            print("Служба перезапущена")
+            print(tl("Служба перезапущена"))
         elif command == "status":
             state = win32serviceutil.QueryServiceStatus(SERVICE_NAME)[1]
-            names = {1: "остановлена", 2: "запускается", 3: "останавливается", 4: "работает"}
-            print(f"Служба {SERVICE_NAME}: {names.get(state, state)}")
+            names = {1: tl("остановлена"), 2: tl("запускается"), 3: tl("останавливается"), 4: tl("работает")}
+            print(tl("Служба {SERVICE_NAME}: {get}", SERVICE_NAME=SERVICE_NAME, get=names.get(state, state)))
         else:
-            print(USAGE)
+            print(usage())
             return 2
     except Exception as exc:
-        print(f"Ошибка: {exc}")
+        print(tl("Ошибка: {exc}", exc=exc))
         return 1
     return 0
 
@@ -141,7 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     command = argv[0].lower() if argv else ""
     if command in {"-h", "--help", "help", "/?"}:
-        print(USAGE)
+        print(usage())
         return 0
     if command == "run":
         return run_console()
@@ -156,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     if sys.platform != "win32":
         if not command:
             return run_console()
-        print("Управление службой доступно только в Windows")
+        print(tl("Управление службой доступно только в Windows"))
         return 1
     if command:
         return manage(command)
@@ -170,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         servicemanager.StartServiceCtrlDispatcher()
     except BaseException as exc:
         if getattr(exc, "winerror", None) == 1063:
-            print(USAGE)
+            print(usage())
             return run_console()
         write_service_error(traceback.format_exc())
         raise

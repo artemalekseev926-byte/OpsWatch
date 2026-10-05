@@ -18,6 +18,7 @@ from opswatch.connectors import get_connector_class
 from opswatch.core.events import EventIn, make_fingerprint
 from opswatch.core.render import esc
 from opswatch.db import utcnow
+from opswatch.i18n import ts
 from opswatch.models import BackupJob, BackupRecord, Source, User
 from opswatch.permissions import has_perm, role_name
 from opswatch.sizes import human_size
@@ -111,12 +112,12 @@ class BackupManager:
         error = ""
         try:
             if connector is None:
-                raise BackupError("Источник для бэкапа не найден")
+                raise BackupError(ts("Источник для бэкапа не найден"))
             engine_cls = ENGINES.get(source_type)
             if engine_cls is None or not get_connector_class(source_type).supports_backup:
-                raise BackupError(f"Тип источника {source_type} не поддерживает резервное копирование")
+                raise BackupError(ts("Тип источника {source_type} не поддерживает резервное копирование", source_type=source_type))
             if encrypted and not password:
-                raise BackupError("Включено шифрование, но не задан пароль архива")
+                raise BackupError(ts("Включено шифрование, но не задан пароль архива"))
             workdir.mkdir(parents=True, exist_ok=True)
             files = await engine_cls(connector, options, self.settings).dump(workdir)
             job_dir = self.root() / f"{job_id}_{safe_name(job_name)}"
@@ -135,7 +136,7 @@ class BackupManager:
             delivery = await self.deliver(job_id, archive, size, count, encrypted)
         except Exception as exc:
             error = str(exc) or type(exc).__name__
-            log.warning("Бэкап %s завершился ошибкой: %s", job_name, error)
+            log.warning(ts("Бэкап %s завершился ошибкой: %s"), job_name, error)
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 
@@ -163,7 +164,7 @@ class BackupManager:
         if error:
             await self.pipeline.ingest(
                 EventIn(
-                    title=f"Бэкап «{job_name}» не выполнен",
+                    title=ts("Бэкап «{job_name}» не выполнен", job_name=job_name),
                     message=error,
                     severity="critical",
                     category="backup",
@@ -177,26 +178,29 @@ class BackupManager:
         else:
             await self.pipeline.ingest(
                 EventIn(title="ok", category="backup", source_id=source_id, fingerprint=fail_fp, resolve=True,
-                        message=f"Бэкап «{job_name}» снова выполняется успешно")
+                        message=ts("Бэкап «{job_name}» снова выполняется успешно", job_name=job_name))
             )
             problems = [name for name, value in delivery.items() if isinstance(value, dict) and value.get("error")]
             telegram = delivery.get("telegram") or {}
             if telegram.get("failed"):
                 problems.append("telegram")
             lines = [
-                f"Размер: {human_size(record.size)}, время: {duration:.0f} сек",
-                "Архив проверен: целостность в порядке",
+                ts("Размер: {human_size}, время: {duration:.0f} сек", human_size=human_size(record.size), duration=duration),
+                ts("Архив проверен: целостность в порядке"),
                 f"SHA-256: {record.sha256[:16]}…",
             ]
             if telegram:
-                lines.append(f"Telegram: отправлено {telegram.get('sent', 0)}, ошибок {telegram.get('failed', 0)}")
+                lines.append(ts("Telegram: отправлено {sent}, ошибок {failed}", sent=telegram.get("sent", 0), failed=telegram.get("failed", 0)))
             for name in ("folder", "s3"):
                 if name in delivery:
                     item = delivery[name]
-                    lines.append(f"{name}: {'ошибка — ' + item['error'] if item.get('error') else 'выгружено'}")
+                    if item.get("error"):
+                        lines.append(ts("{name}: ошибка — {error}", name=name, error=item["error"]))
+                    else:
+                        lines.append(ts("{name}: выгружено", name=name))
             await self.pipeline.ingest(
                 EventIn(
-                    title=f"Бэкап «{job_name}» {'выполнен с ошибками доставки' if problems else 'выполнен'}",
+                    title=ts("Бэкап «{job_name}» выполнен с ошибками доставки", job_name=job_name) if problems else ts("Бэкап «{job_name}» выполнен", job_name=job_name),
                     message="\n".join(lines),
                     severity="warning" if problems else "info",
                     category="backup",
@@ -233,9 +237,8 @@ class BackupManager:
                 result["s3"] = {"error": str(exc)}
         if destinations.get("telegram", True):
             caption = (
-                f"💾 <b>Бэкап «{esc(job_name)}»</b>\n"
-                f"{esc(archive.name)} · {human_size(size)} · файлов: {files_count}\n"
-                f"{'🔒 Зашифрован AES-256' if encrypted else ''}"
+                ts("💾 <b>Бэкап «{job}»</b>\n{file} · {size} · файлов: {files_count}", job=esc(job_name), file=esc(archive.name), size=human_size(size), files_count=files_count)
+                + ("\n" + ts("🔒 Зашифрован AES-256") if encrypted else "")
             ).strip()
             result["telegram"] = await send_to_telegram(
                 self.bot_provider(),
@@ -267,7 +270,7 @@ class BackupManager:
                     try:
                         Path(record.file_path).unlink(missing_ok=True)
                     except OSError as exc:
-                        log.warning("Не удалось удалить старый бэкап %s: %s", record.file_path, exc)
+                        log.warning(ts("Не удалось удалить старый бэкап %s: %s"), record.file_path, exc)
                         continue
                 record.deleted = True
                 removed += 1

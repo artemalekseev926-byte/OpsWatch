@@ -11,6 +11,7 @@ from tzlocal import get_localzone
 
 from opswatch.connectors import get_connector_class
 from opswatch.db import utcnow
+from opswatch.i18n import ts
 from opswatch.models import AuthSession, BackupJob, Event, Notification, Source
 
 log = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ MIN_INTERVAL = 15
 def validate_cron(expression: str) -> CronTrigger:
     expression = (expression or "").strip()
     if len(expression.split()) != 5:
-        raise ValueError("Ожидается 5 полей: минута час день месяц день_недели")
+        raise ValueError(ts("Ожидается 5 полей: минута час день месяц день_недели"))
     return CronTrigger.from_crontab(expression, timezone=get_localzone())
 
 
@@ -109,7 +110,7 @@ class Scheduler:
                     trigger = validate_cron(value)
                     first = None
             except ValueError as exc:
-                log.warning("Неверное расписание %s: %s", job_id, exc)
+                log.warning(ts("Неверное расписание %s: %s"), job_id, exc)
                 continue
             func = {
                 "source": self.rt.sources.poll,

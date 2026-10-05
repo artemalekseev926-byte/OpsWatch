@@ -12,6 +12,7 @@ from typing import Any
 from opswatch.backup.archive import BackupError
 from opswatch.connectors import Connector
 from opswatch.connectors.onec import is_file_locked
+from opswatch.i18n import ts
 
 CREATE_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
@@ -29,12 +30,12 @@ async def run_tool(command: list[str], env: dict[str, str] | None = None, timeou
             creationflags=CREATE_NO_WINDOW,
         )
     except FileNotFoundError as exc:
-        raise BackupError(f"Не найдена программа {command[0]}. Укажите путь в настройках") from exc
+        raise BackupError(ts("Не найдена программа {value}. Укажите путь в настройках", value=command[0])) from exc
     except subprocess.TimeoutExpired as exc:
-        raise BackupError("Превышено время выполнения резервного копирования") from exc
+        raise BackupError(ts("Превышено время выполнения резервного копирования")) from exc
     stderr = result.stderr.decode("utf-8", errors="replace").strip()
     if result.returncode != 0:
-        raise BackupError(f"{Path(command[0]).name} завершился с кодом {result.returncode}: {stderr[-1500:]}")
+        raise BackupError(ts("{name} завершился с кодом {returncode}: {value}", name=Path(command[0]).name, returncode=result.returncode, value=stderr[-1500:]))
     return stderr
 
 
@@ -77,7 +78,7 @@ class MySQLDumpEngine(BackupEngine):
         command += [p["database"]] if p["database"] else ["--all-databases"]
         await run_tool(command, {"MYSQL_PWD": p["password"]})
         if not out.exists() or out.stat().st_size == 0:
-            raise BackupError("mysqldump не создал файл дампа")
+            raise BackupError(ts("mysqldump не создал файл дампа"))
         return [out]
 
 
@@ -105,7 +106,7 @@ class PgDumpEngine(BackupEngine):
         command.append(p["database"])
         await run_tool(command, {"PGPASSWORD": p["password"], "PGCONNECT_TIMEOUT": "30"})
         if not out.exists() or out.stat().st_size == 0:
-            raise BackupError("pg_dump не создал файл дампа")
+            raise BackupError(ts("pg_dump не создал файл дампа"))
         return [out]
 
 
@@ -115,7 +116,7 @@ class MSSQLBackupEngine(BackupEngine):
     async def dump(self, workdir: Path) -> list[Path]:
         server_dir = str(self.options.get("server_dir") or "").strip()
         if not server_dir:
-            raise BackupError("Укажите каталог для BACKUP DATABASE на сервере SQL")
+            raise BackupError(ts("Укажите каталог для BACKUP DATABASE на сервере SQL"))
         local_dir = str(self.options.get("local_dir") or server_dir).strip()
         p = self.connector.params()
         name = f"{p['database']}_{datetime.now():%Y%m%d_%H%M%S}.bak"
@@ -124,7 +125,7 @@ class MSSQLBackupEngine(BackupEngine):
         await self.connector.execute_backup(server_path)
         source = Path(local_dir) / name
         if not source.exists():
-            raise BackupError(f"Файл бэкапа не найден по пути {source}. Проверьте доступ к каталогу")
+            raise BackupError(ts("Файл бэкапа не найден по пути {source}. Проверьте доступ к каталогу", source=source))
         target = workdir / name
         await asyncio.to_thread(shutil.move, str(source), str(target))
         return [target]
@@ -145,11 +146,11 @@ def _powershell(script: str) -> str:
 
 def vss_copy(source: Path, target: Path) -> None:
     if sys.platform != "win32":
-        raise BackupError("Теневое копирование доступно только в Windows")
+        raise BackupError(ts("Теневое копирование доступно только в Windows"))
     source = source.resolve()
     drive = source.drive
     if not drive or len(drive) != 2:
-        raise BackupError("Теневое копирование возможно только для локального диска")
+        raise BackupError(ts("Теневое копирование возможно только для локального диска"))
     create = (
         f"$r = (Get-WmiObject -List Win32_ShadowCopy).Create('{drive}\\', 'ClientAccessible'); "
         "if ($r.ReturnValue -ne 0) { throw ('Win32_ShadowCopy.Create: ' + $r.ReturnValue) }; "
@@ -176,14 +177,14 @@ class OneCFileEngine(BackupEngine):
     async def dump(self, workdir: Path) -> list[Path]:
         db_file: Path = self.connector.db_file
         if not db_file.exists():
-            raise BackupError(f"Файл базы не найден: {db_file}")
+            raise BackupError(ts("Файл базы не найден: {db_file}", db_file=db_file))
         target = workdir / "1Cv8.1CD"
         if is_file_locked(db_file):
             if self.options.get("use_vss"):
                 await asyncio.to_thread(vss_copy, db_file, target)
             else:
                 raise BackupError(
-                    "База занята пользователями. Включите теневое копирование (VSS) или запланируйте бэкап на нерабочее время"
+                    ts("База занята пользователями. Включите теневое копирование (VSS) или запланируйте бэкап на нерабочее время")
                 )
         else:
             await asyncio.to_thread(shutil.copy2, db_file, target)

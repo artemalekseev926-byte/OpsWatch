@@ -14,6 +14,8 @@ from opswatch.models import User
 from opswatch.runtime import Runtime
 from opswatch.web.app import create_app
 
+os.environ.setdefault("OPSWATCH_LANGUAGE", "ru")
+
 
 class FakeBot:
     def __init__(self) -> None:

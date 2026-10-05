@@ -16,6 +16,7 @@ from opswatch.constants import (
     SEVERITY_TITLES,
 )
 from opswatch.db import iso
+from opswatch.i18n import LANGUAGE_TITLES, current_language, tr
 from opswatch.models import Attachment, BackupJob, Event, Notification, Role, Source, User
 from opswatch.permissions import has_perm, visible_categories
 from opswatch.services.bugs import create_bug, save_attachment
@@ -47,20 +48,22 @@ async def meta(user: User | None = Depends(optional_user), rt=Depends(get_rt)):
         "version": __version__,
         "registration_enabled": bool(rt.settings.get("registration_enabled")),
         "bot_username": rt.bot.username,
-        "categories": [{"id": c, "title": CATEGORY_TITLES[c]} for c in CATEGORIES],
-        "severities": [{"id": s, "title": SEVERITY_TITLES[s]} for s in SEVERITIES],
-        "statuses": [{"id": k, "title": v} for k, v in EVENT_STATUS_TITLES.items()],
+        "categories": [{"id": c, "title": tr(CATEGORY_TITLES[c])} for c in CATEGORIES],
+        "severities": [{"id": s, "title": tr(SEVERITY_TITLES[s])} for s in SEVERITIES],
+        "statuses": [{"id": k, "title": tr(v)} for k, v in EVENT_STATUS_TITLES.items()],
+        "languages": [{"id": k, "title": v} for k, v in LANGUAGE_TITLES.items()],
+        "language": current_language(),
     }
     if user is not None and user.status == "active":
         async with rt.db.session() as session:
             roles = (await session.execute(select(Role).order_by(Role.id))).scalars().all()
-            data["roles"] = [{"id": r.id, "name": r.name, "title": r.title} for r in roles]
+            data["roles"] = [{"id": r.id, "name": r.name, "title": tr(r.title)} for r in roles]
             if any(has_perm(user, p) for p in ("rules.manage", "backups.manage", "users.manage", "sources.manage")):
                 users = (await session.execute(select(User).where(User.status == "active").order_by(User.username))).scalars().unique().all()
                 data["users"] = [short_user(u) for u in users]
                 sources = (await session.execute(select(Source).order_by(Source.name))).scalars().all()
                 data["sources"] = [{"id": s.id, "name": s.name, "type": s.type, "category": s.category} for s in sources]
-        data["permissions"] = [{"id": k, "title": v} for k, v in PERMISSIONS.items()]
+        data["permissions"] = [{"id": k, "title": tr(v)} for k, v in PERMISSIONS.items()]
         data["connectors"] = [cls.describe() for cls in REGISTRY.values()]
     return data
 
@@ -145,7 +148,7 @@ async def get_event(event_id: int, user: User = Depends(active_user), rt=Depends
     async with rt.db.session() as session:
         event = await event_for_user(session, event_id, user)
         if event is None:
-            raise HTTPException(404, "Событие не найдено")
+            raise HTTPException(404, tr("Событие не найдено"))
         names = await user_names(session, event_user_ids([event]))
         return event_dict(event, names, full=True)
 
@@ -154,7 +157,7 @@ async def get_event(event_id: int, user: User = Depends(active_user), rt=Depends
 async def ack_event(event_id: int, user: User = Depends(require("events.manage")), rt=Depends(get_rt)):
     async with rt.db.session() as session:
         if await event_for_user(session, event_id, user) is None:
-            raise HTTPException(404, "Событие не найдено")
+            raise HTTPException(404, tr("Событие не найдено"))
     await rt.pipeline.ack(event_id, user)
     return await get_event(event_id, user, rt)
 
@@ -165,7 +168,7 @@ async def resolve_event(
 ):
     async with rt.db.session() as session:
         if await event_for_user(session, event_id, user) is None:
-            raise HTTPException(404, "Событие не найдено")
+            raise HTTPException(404, tr("Событие не найдено"))
     await rt.pipeline.resolve(event_id, user, data.note.strip())
     return await get_event(event_id, user, rt)
 
@@ -175,14 +178,14 @@ async def get_attachment(attachment_id: int, user: User = Depends(active_user), 
     async with rt.db.session() as session:
         attachment = await session.get(Attachment, attachment_id)
         if attachment is None:
-            raise HTTPException(404, "Файл не найден")
+            raise HTTPException(404, tr("Файл не найден"))
         event = await session.get(Event, attachment.event_id)
         own = event is not None and event.reporter_id == user.id
         if not own and await event_for_user(session, attachment.event_id, user) is None:
-            raise HTTPException(404, "Файл не найден")
+            raise HTTPException(404, tr("Файл не найден"))
     path = rt.config.attachments_dir / attachment.stored_name
     if not path.exists():
-        raise HTTPException(404, "Файл удалён")
+        raise HTTPException(404, tr("Файл удалён"))
     return FileResponse(path, media_type=attachment.content_type, filename=attachment.filename)
 
 
@@ -196,7 +199,7 @@ async def report_bug(
     rt=Depends(get_rt),
 ):
     if not title.strip() and not text.strip():
-        raise HTTPException(422, "Опишите проблему")
+        raise HTTPException(422, tr("Опишите проблему"))
     attachments = []
     for upload in (files or [])[:5]:
         content = await upload.read()

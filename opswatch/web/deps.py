@@ -5,6 +5,7 @@ from datetime import timedelta
 from fastapi import Depends, HTTPException, Request
 
 from opswatch.db import utcnow
+from opswatch.i18n import tr
 from opswatch.models import AuthSession, User
 from opswatch.permissions import has_perm
 from opswatch.security import token_hash
@@ -48,22 +49,22 @@ async def optional_user(request: Request) -> User | None:
 
 async def current_user(user: User | None = Depends(optional_user)) -> User:
     if user is None:
-        raise HTTPException(status_code=401, detail="Требуется вход")
+        raise HTTPException(status_code=401, detail=tr("Требуется вход"))
     if user.status == "blocked":
-        raise HTTPException(status_code=403, detail="Учётная запись заблокирована")
+        raise HTTPException(status_code=403, detail=tr("Учётная запись заблокирована"))
     return user
 
 
 async def active_user(user: User = Depends(current_user)) -> User:
     if user.status != "active":
-        raise HTTPException(status_code=403, detail="Учётная запись ожидает подтверждения администратором")
+        raise HTTPException(status_code=403, detail=tr("Учётная запись ожидает подтверждения администратором"))
     return user
 
 
 def require(permission: str):
     async def dependency(user: User = Depends(active_user)) -> User:
         if not has_perm(user, permission):
-            raise HTTPException(status_code=403, detail="Недостаточно прав")
+            raise HTTPException(status_code=403, detail=tr("Недостаточно прав"))
         return user
 
     return dependency

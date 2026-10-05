@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from opswatch.db import iso
+from opswatch.i18n import tr
 from opswatch.models import BackupJob, BackupRecord, Event, Notification, Role, Rule, Source, User
 from opswatch.permissions import effective_permissions
 
@@ -17,7 +18,7 @@ def role_dict(role: Role | None) -> dict[str, Any] | None:
     return {
         "id": role.id,
         "name": role.name,
-        "title": role.title,
+        "title": tr(role.title),
         "permissions": list(role.permissions or []),
         "builtin": role.builtin,
     }
@@ -41,6 +42,7 @@ def user_dict(user: User) -> dict[str, Any]:
         "notify_desktop": user.notify_desktop,
         "quiet_start": user.quiet_start,
         "quiet_end": user.quiet_end,
+        "language": user.language or "ru",
         "note": user.note,
         "created_at": iso(user.created_at),
         "last_login_at": iso(user.last_login_at),
@@ -204,7 +206,7 @@ def record_dict(record: BackupRecord) -> dict[str, Any]:
 def rule_dict(rule: Rule) -> dict[str, Any]:
     return {
         "id": rule.id,
-        "name": rule.name,
+        "name": tr(rule.name),
         "enabled": rule.enabled,
         "priority": rule.priority,
         "categories": rule.categories or [],

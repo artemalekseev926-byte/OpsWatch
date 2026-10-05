@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pyzipper
 
+from opswatch.i18n import ts
+
 CHUNK = 4 * 1024 * 1024
 
 
@@ -42,14 +44,14 @@ def verify_archive(path: Path, password: str = "") -> int:
                 archive.setpassword(password.encode("utf-8"))
             names = archive.namelist()
             if not names:
-                raise BackupError("Архив пуст")
+                raise BackupError(ts("Архив пуст"))
             bad = archive.testzip()
     except BackupError:
         raise
     except Exception as exc:
-        raise BackupError(f"Архив не прошёл проверку: {exc}") from exc
+        raise BackupError(ts("Архив не прошёл проверку: {exc}", exc=exc)) from exc
     if bad:
-        raise BackupError(f"Архив повреждён: {bad}")
+        raise BackupError(ts("Архив повреждён: {bad}", bad=bad))
     return len(names)
 
 

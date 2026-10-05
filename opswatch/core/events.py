@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from opswatch.constants import CATEGORIES
+from opswatch.i18n import ts
 
 _INFO = {"info", "information", "informational", "ok", "notice", "low", "debug", "not classified", "note", "i", "n"}
 _WARNING = {"warning", "warn", "average", "medium", "minor", "w"}
@@ -96,7 +97,7 @@ class EventIn(BaseModel):
     @field_validator("title", mode="before")
     @classmethod
     def _title(cls, value: Any) -> str:
-        text = str(value or "").strip() or "Без названия"
+        text = str(value or "").strip() or ts("Без названия")
         return text[:500]
 
     def key(self) -> str:

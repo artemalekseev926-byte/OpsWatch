@@ -14,6 +14,7 @@ from opswatch.constants import CATEGORIES
 from opswatch.core.ingest import parse_alertmanager, parse_generic, parse_zabbix
 from opswatch.core.metrics import PERIODS, PRIMARY, describe
 from opswatch.db import iso, utcnow
+from opswatch.i18n import tr
 from opswatch.models import Source, User
 from opswatch.permissions import can_view_event, has_perm
 from opswatch.security import new_token, safe_equals
@@ -53,7 +54,7 @@ def base_url(request: Request, rt) -> str:
 def serialize(rt, source: Source, manage: bool, url: str) -> dict[str, Any]:
     try:
         cls = get_connector_class(source.type)
-        title, passive = cls.title, cls.passive
+        title, passive = tr(cls.title), cls.passive
         config = rt.sources.masked_config(source) if manage else None
     except ConnectorError:
         title, passive, config = source.type, False, dict(source.config or {})
@@ -67,12 +68,12 @@ def validate(data: SourceIn) -> type:
     except ConnectorError as exc:
         raise HTTPException(422, str(exc)) from exc
     if data.category and data.category not in CATEGORIES:
-        raise HTTPException(422, "Неизвестная категория")
+        raise HTTPException(422, tr("Неизвестная категория"))
     for spec in cls.fields:
         if spec.required and spec.type != "checks" and data.config.get(spec.name) in (None, "") and not spec.secret:
             if spec.name == "database" and data.config.get("dsn"):
                 continue
-            raise HTTPException(422, f"Заполните поле «{spec.label}»")
+            raise HTTPException(422, tr("Заполните поле «{label}»", label=spec.label))
     return cls
 
 
@@ -120,9 +121,9 @@ async def update_source(
     async with rt.db.session() as session:
         source = await session.get(Source, source_id)
         if source is None:
-            raise HTTPException(404, "Источник не найден")
+            raise HTTPException(404, tr("Источник не найден"))
         if source.type != data.type:
-            raise HTTPException(422, "Тип источника нельзя изменить")
+            raise HTTPException(422, tr("Тип источника нельзя изменить"))
         config, secrets = rt.sources.split_config(data.type, data.config, source.secrets)
         source.name = data.name.strip()
         source.category = data.category or cls.category
@@ -144,7 +145,7 @@ async def delete_source(source_id: int, user: User = Depends(require("sources.ma
     async with rt.db.session() as session:
         source = await session.get(Source, source_id)
         if source is None:
-            raise HTTPException(404, "Источник не найден")
+            raise HTTPException(404, tr("Источник не найден"))
         await session.delete(source)
         await session.commit()
     await rt.scheduler.sync()
@@ -156,7 +157,7 @@ async def test_source(data: TestIn, user: User = Depends(require("sources.manage
     try:
         result = await rt.sources.test_config(data.type, data.name, data.category, data.config, data.id)
     except asyncio.TimeoutError:
-        return {"ok": False, "message": "Превышено время ожидания"}
+        return {"ok": False, "message": tr("Превышено время ожидания")}
     except Exception as exc:
         return {"ok": False, "message": str(exc) or type(exc).__name__}
     return {"ok": True, "message": result.message, "metrics": result.metrics}
@@ -176,12 +177,12 @@ async def preview_check(data: PreviewIn, user: User = Depends(require("sources.m
     if hasattr(connector, "dbms_connector"):
         connector = connector.dbms_connector()
     if not isinstance(connector, SqlConnector):
-        raise HTTPException(422, "Проверки доступны только для SQL-источников")
+        raise HTTPException(422, tr("Проверки доступны только для SQL-источников"))
     try:
         rows = await asyncio.wait_for(connector.run_check_preview(data.check), timeout=60)
     except Exception as exc:
         return {"ok": False, "message": str(exc) or type(exc).__name__, "rows": []}
-    return {"ok": True, "message": f"Строк: {len(rows)}", "rows": rows}
+    return {"ok": True, "message": tr("Строк: {len}", len=len(rows)), "rows": rows}
 
 
 @router.post("/sources/{source_id}/poll")
@@ -190,16 +191,16 @@ async def poll_source(source_id: int, user: User = Depends(require("sources.mana
     async with rt.db.session() as session:
         source = await session.get(Source, source_id)
         if source is None:
-            raise HTTPException(404, "Источник не найден")
+            raise HTTPException(404, tr("Источник не найден"))
         status, error = source.status, source.last_error
-    message = error if status == "error" else (result.message if result else "Опрос уже выполняется или источник пассивный")
+    message = error if status == "error" else (result.message if result else tr("Опрос уже выполняется или источник пассивный"))
     return {"ok": status != "error", "status": status, "message": message}
 
 
 @router.post("/sources/{source_id}/maintenance")
 async def maintenance_source(source_id: int, user: User = Depends(require("sources.manage")), rt=Depends(get_rt)):
     result = await rt.sources.maintenance(source_id)
-    return {"ok": result is not None, "message": result.message if result else "Источник не найден"}
+    return {"ok": result is not None, "message": result.message if result else tr("Источник не найден")}
 
 
 @router.post("/sources/{source_id}/token")
@@ -209,7 +210,7 @@ async def regenerate_token(
     async with rt.db.session() as session:
         source = await session.get(Source, source_id)
         if source is None:
-            raise HTTPException(404, "Источник не найден")
+            raise HTTPException(404, tr("Источник не найден"))
         source.ingest_token = new_token(24)
         await session.commit()
         await session.refresh(source)
@@ -220,7 +221,7 @@ async def visible_source(rt, user: User, source_id: int) -> Source:
     async with rt.db.session() as session:
         source = await session.get(Source, source_id)
     if source is None or not can_view_event(user, source.category, source.visible_roles):
-        raise HTTPException(404, "Источник не найден")
+        raise HTTPException(404, tr("Источник не найден"))
     return source
 
 
@@ -241,7 +242,7 @@ async def source_metric_points(
 ):
     source = await visible_source(rt, user, source_id)
     if period not in PERIODS:
-        raise HTTPException(422, "Неизвестный период")
+        raise HTTPException(422, tr("Неизвестный период"))
     points = await rt.metrics.points(source.id, name, period)
     return {**describe(name), "period": period, "points": [[iso(ts), round(value, 4)] for ts, value in points]}
 
@@ -267,9 +268,9 @@ async def ingest(token: str, request: Request, rt=Depends(get_rt)):
     async with rt.db.session() as session:
         source = await session.scalar(select(Source).where(Source.ingest_token == token))
         if source is None or not source.ingest_token or not safe_equals(source.ingest_token, token):
-            raise HTTPException(404, "Неизвестный токен")
+            raise HTTPException(404, tr("Неизвестный токен"))
         if not source.enabled:
-            raise HTTPException(403, "Источник отключён")
+            raise HTTPException(403, tr("Источник отключён"))
         source_id, name, kind, category = source.id, source.name, source.type, source.category
         default_severity = (source.config or {}).get("default_severity") or "warning"
     raw = await request.body()

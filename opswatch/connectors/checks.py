@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable
 
 from opswatch.connectors.base import Connector, ConnectorError
 from opswatch.core.events import EventIn
+from opswatch.i18n import ts
 
 OPERATORS: dict[str, Callable[[Any, Any], bool]] = {
     ">": operator.gt,
@@ -37,14 +38,14 @@ MAX_ROW_EVENTS = 5
 def ensure_read_only(query: str) -> str:
     cleaned = _COMMENTS.sub(" ", query or "").strip().rstrip(";").strip()
     if not cleaned:
-        raise ConnectorError("Пустой запрос")
+        raise ConnectorError(ts("Пустой запрос"))
     head = cleaned.split(None, 1)[0].lower()
     if head not in {"select", "with", "show"}:
-        raise ConnectorError("Разрешены только запросы SELECT / WITH")
+        raise ConnectorError(ts("Разрешены только запросы SELECT / WITH"))
     if ";" in cleaned:
-        raise ConnectorError("Разрешён только один запрос")
+        raise ConnectorError(ts("Разрешён только один запрос"))
     if _FORBIDDEN.search(re.sub(r"'(?:[^']|'')*'", "''", cleaned)):
-        raise ConnectorError("Запрос содержит изменяющие операторы")
+        raise ConnectorError(ts("Запрос содержит изменяющие операторы"))
     return cleaned
 
 
@@ -90,7 +91,7 @@ def to_number(value: Any) -> float:
     try:
         return float(str(value).replace(",", "."))
     except (TypeError, ValueError) as exc:
-        raise ConnectorError(f"Значение «{value}» не является числом") from exc
+        raise ConnectorError(ts("Значение «{value}» не является числом", value=value)) from exc
 
 
 def format_row(row: dict[str, Any], limit: int = 12) -> str:
@@ -127,7 +128,7 @@ async def run_checks(
     for index, check in enumerate(checks or []):
         if not check or not check.get("enabled", True):
             continue
-        name = (check.get("name") or f"Проверка {index + 1}").strip()
+        name = (check.get("name") or ts("Проверка {value}", value=index + 1)).strip()
         mode = check.get("mode") or "threshold"
         severity = check.get("severity") or "warning"
         state_key = f"check:{name}"
@@ -160,7 +161,7 @@ async def run_checks(
                     for key_value, row in fresh[:MAX_ROW_EVENTS]:
                         events.append(
                             connector.event(
-                                title=render_title(check.get("title", ""), row, f"{name}: новая запись {key_value}"),
+                                title=render_title(check.get("title", ""), row, ts("{name}: новая запись {key_value}", name=name, key_value=key_value)),
                                 message=format_row(row),
                                 severity=severity,
                                 type="check.new_row",
@@ -171,7 +172,7 @@ async def run_checks(
                     if len(fresh) > MAX_ROW_EVENTS:
                         events.append(
                             connector.event(
-                                title=f"{name}: ещё {len(fresh) - MAX_ROW_EVENTS} новых записей",
+                                title=ts("{name}: ещё {value} новых записей", name=name, value=len(fresh) - MAX_ROW_EVENTS),
                                 severity=severity,
                                 type="check.new_row",
                                 fingerprint=connector.fingerprint("rows", name, top),
@@ -186,7 +187,7 @@ async def run_checks(
                     preview = "\n\n".join(format_row(r, 6) for r in rows[:3])
                     events.append(
                         connector.event(
-                            title=render_title(check.get("title", ""), rows[0], f"{name}: найдено строк: {len(rows)}"),
+                            title=render_title(check.get("title", ""), rows[0], ts("{name}: найдено строк: {len}", name=name, len=len(rows))),
                             message=preview,
                             severity=severity,
                             type="check.rows",
@@ -195,16 +196,16 @@ async def run_checks(
                         )
                     )
                 else:
-                    events.append(connector.resolved(fp, message=f"{name}: условие больше не выполняется"))
+                    events.append(connector.resolved(fp, message=ts("{name}: условие больше не выполняется", name=name)))
             else:
                 rows = await fetch(query)
                 if not rows:
-                    raise ConnectorError("Запрос не вернул значение")
+                    raise ConnectorError(ts("Запрос не вернул значение"))
                 value = to_number(next(iter(rows[0].values())))
                 threshold = to_number(check.get("threshold", 0))
                 op = check.get("operator") or ">"
                 if op not in OPERATORS:
-                    raise ConnectorError(f"Неизвестный оператор {op}")
+                    raise ConnectorError(ts("Неизвестный оператор {op}", op=op))
                 new_state[f"value:{name}"] = value
                 if OPERATORS[op](value, threshold):
                     events.append(
@@ -214,7 +215,7 @@ async def run_checks(
                                 {"value": value, "threshold": threshold},
                                 f"{name}: {value:g} {op} {threshold:g}",
                             ),
-                            message=f"Текущее значение: {value:g}\nПорог: {op} {threshold:g}",
+                            message=ts("Текущее значение: {value:g}\nПорог: {op} {threshold:g}", value=value, op=op, threshold=threshold),
                             severity=severity,
                             type="check.threshold",
                             fingerprint=fp,
@@ -222,11 +223,11 @@ async def run_checks(
                         )
                     )
                 else:
-                    events.append(connector.resolved(fp, message=f"{name}: значение в норме ({value:g})"))
+                    events.append(connector.resolved(fp, message=ts("{name}: значение в норме ({value:g})", name=name, value=value)))
         except Exception as exc:
             events.append(
                 connector.event(
-                    title=f"Ошибка проверки «{name}»",
+                    title=ts("Ошибка проверки «{name}»", name=name),
                     message=str(exc),
                     severity="warning",
                     type="check.error",

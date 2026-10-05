@@ -16,6 +16,7 @@ from opswatch.connectors.base import (
     SourceContext,
     register,
 )
+from opswatch.i18n import ts
 
 log = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def load_connectors(plugins_dir: Path | None = None) -> dict[str, type[Connector
                 try:
                     entry.load()
                 except Exception:
-                    log.exception("Не удалось загрузить коннектор %s", entry.name)
+                    log.exception(ts("Не удалось загрузить коннектор %s"), entry.name)
         except Exception:
             log.debug("entry points unavailable", exc_info=True)
         _loaded = True
@@ -53,16 +54,16 @@ def load_connectors(plugins_dir: Path | None = None) -> dict[str, type[Connector
                 module = importlib.util.module_from_spec(spec)
                 sys.modules[name] = module
                 spec.loader.exec_module(module)
-                log.info("Загружен плагин %s", path.name)
+                log.info(ts("Загружен плагин %s"), path.name)
             except Exception:
-                log.exception("Ошибка загрузки плагина %s", path)
+                log.exception(ts("Ошибка загрузки плагина %s"), path)
     return REGISTRY
 
 
 def get_connector_class(kind: str) -> type[Connector]:
     load_connectors()
     if kind not in REGISTRY:
-        raise ConnectorError(f"Неизвестный тип источника: {kind}")
+        raise ConnectorError(ts("Неизвестный тип источника: {kind}", kind=kind))
     return REGISTRY[kind]
 
 

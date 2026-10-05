@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 
 from opswatch.constants import BUILTIN_ROLES, DEFAULT_RULES
 from opswatch.db import Database
+from opswatch.i18n import system_language, tr, ts
 from opswatch.models import Role, Rule, User
 from opswatch.security import hash_password
 
@@ -26,17 +27,19 @@ async def bootstrap(db: Database, admin_username: str, admin_password: str) -> N
         users_count = (await session.execute(select(func.count(User.id)))).scalar_one()
         if users_count == 0:
             admin_role = (await session.execute(select(Role).where(Role.name == "admin"))).scalar_one()
+            lang = system_language()
             session.add(
                 User(
                     username=admin_username,
                     password_hash=hash_password(admin_password),
-                    full_name="Администратор",
+                    full_name=tr("Администратор", lang),
+                    language=lang,
                     status="active",
                     is_superuser=True,
                     role_id=admin_role.id,
                 )
             )
-            log.warning("Создан администратор по умолчанию: %s (смените пароль в профиле)", admin_username)
+            log.warning(ts("Создан администратор по умолчанию: %s (смените пароль в профиле)"), admin_username)
 
         rules_count = (await session.execute(select(func.count(Rule.id)))).scalar_one()
         if rules_count == 0:

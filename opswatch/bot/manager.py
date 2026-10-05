@@ -14,18 +14,24 @@ from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import BotCommand, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters
 
+from opswatch.i18n import tr, ts
+
 log = logging.getLogger(__name__)
 
 COMMANDS = [
-    BotCommand(command="start", description="Привязка аккаунта и справка"),
-    BotCommand(command="status", description="Сводка по открытым событиям"),
-    BotCommand(command="events", description="Последние открытые события"),
-    BotCommand(command="subscribe", description="Подписки на категории"),
-    BotCommand(command="unsubscribe", description="Отписаться от категорий"),
-    BotCommand(command="bug", description="Сообщить об ошибке (можно со скриншотом)"),
-    BotCommand(command="unlink", description="Отвязать Telegram от аккаунта"),
-    BotCommand(command="help", description="Справка"),
+    ("start", "Привязка аккаунта и справка"),
+    ("status", "Сводка по открытым событиям"),
+    ("events", "Последние открытые события"),
+    ("subscribe", "Подписки на категории"),
+    ("unsubscribe", "Отписаться от категорий"),
+    ("bug", "Сообщить об ошибке (можно со скриншотом)"),
+    ("unlink", "Отвязать Telegram от аккаунта"),
+    ("help", "Справка"),
 ]
+
+
+def bot_commands(lang: str) -> list[BotCommand]:
+    return [BotCommand(command=name, description=tr(description, lang)) for name, description in COMMANDS]
 
 UPLOAD_TIMEOUT = 1800
 
@@ -100,7 +106,7 @@ class BotManager:
                 await bot.session.close()
                 self.status = "error"
                 self.error = f"{type(exc).__name__}: {exc}"
-                log.error("Telegram-бот не запущен: %s", self.error)
+                log.error(ts("Telegram-бот не запущен: %s"), self.error)
                 return
             from opswatch.bot.handlers import build_router
 
@@ -108,7 +114,8 @@ class BotManager:
             dispatcher["rt"] = self.rt
             dispatcher.include_router(build_router())
             try:
-                await bot.set_my_commands(COMMANDS)
+                await bot.set_my_commands(bot_commands("ru"))
+                await bot.set_my_commands(bot_commands("en"), language_code="en")
             except Exception:
                 log.debug("set_my_commands failed", exc_info=True)
             self.bot = bot
@@ -125,7 +132,7 @@ class BotManager:
                 ),
                 name="opswatch-bot",
             )
-            log.info("Telegram-бот @%s запущен", self.username)
+            log.info(ts("Telegram-бот @%s запущен"), self.username)
 
     async def _stop(self) -> None:
         if self.dispatcher is not None and self._task is not None:
@@ -168,7 +175,7 @@ class BotManager:
         if personal_token:
             return self.personal_bot(personal_token)
         if not self.available:
-            raise RuntimeError("Telegram-бот не настроен")
+            raise RuntimeError(ts("Telegram-бот не настроен"))
         return self.bot
 
     async def send(self, chat_id: int, text: str, keyboard=None, silent: bool = False, reply_to: int | None = None) -> int:

@@ -1,5 +1,59 @@
 "use strict";
 
+const LANGS = { ru: "Русский", en: "English" };
+const LANG = detectLanguage();
+const LOCALE = LANG === "ru" ? "ru-RU" : "en-GB";
+const DICT = (window.OW_LOCALES && window.OW_LOCALES[LANG]) || {};
+
+function detectLanguage() {
+  let saved = "";
+  try {
+    saved = localStorage.getItem("ow_lang") || "";
+  } catch (e) {
+    saved = "";
+  }
+  if (saved === "ru" || saved === "en") return saved;
+  const nav = (navigator.language || "ru").toLowerCase();
+  return /^(ru|uk|be|kk)/.test(nav) ? "ru" : "en";
+}
+
+function t(text, values) {
+  let result = (LANG !== "ru" && DICT[text]) || text;
+  if (values) result = result.replace(/\{(\w+)\}/g, (m, key) => (values[key] !== undefined ? String(values[key]) : m));
+  return result;
+}
+
+function explicitLanguage() {
+  try {
+    return localStorage.getItem("ow_lang") || "";
+  } catch (e) {
+    return "";
+  }
+}
+
+async function setLanguage(lang, persist = true) {
+  if (persist && S.token && S.me) {
+    await api("/api/profile", { method: "PUT", body: { language: lang } }).catch(() => {});
+  }
+  store("ow_lang", lang);
+  location.reload();
+}
+
+async function syncLanguage() {
+  if (!S.me) return false;
+  const saved = explicitLanguage();
+  if (saved && saved !== S.me.language) {
+    S.me = await api("/api/profile", { method: "PUT", body: { language: saved } }).catch(() => S.me);
+    return false;
+  }
+  if (!saved && S.me.language && S.me.language !== LANG) {
+    store("ow_lang", S.me.language);
+    location.reload();
+    return true;
+  }
+  return false;
+}
+
 const S = {
   token: store("ow_token"),
   me: null,
@@ -15,15 +69,15 @@ const S = {
   dropdown: null,
 };
 
-const SEV = { info: "Информация", warning: "Предупреждение", critical: "Критично" };
-const SEV_SHORT = { info: "Инфо", warning: "Предупр.", critical: "Критично" };
-const STATUS = { new: "Новое", acked: "Принято", resolved: "Решено" };
-const CAT = { monitoring: "Мониторинг", database: "Базы данных", onec: "1С", backup: "Бэкапы", bug: "Ошибки", system: "Система" };
+const SEV = { info: t("Информация"), warning: t("Предупреждение"), critical: t("Критично") };
+const SEV_SHORT = { info: t("Инфо"), warning: t("Предупр."), critical: t("Критично") };
+const STATUS = { new: t("Новое"), acked: t("Принято"), resolved: t("Решено") };
+const CAT = { monitoring: t("Мониторинг"), database: t("Базы данных"), onec: t("1С"), backup: t("Бэкапы"), bug: t("Ошибки"), system: t("Система") };
 const CAT_ICON = { monitoring: "activity", database: "database", onec: "box", backup: "archive", bug: "bug", system: "shield" };
 const CAT_TAB = { monitoring: "monitoring", database: "databases", onec: "onec", backup: "backups", bug: "bugs", system: "journal" };
 const VIEW_PERMS = ["monitoring.view", "databases.view", "onec.view", "backups.view", "bugs.view", "system.view"];
-const BACKUP_STATUS = { ok: "Успешно", failed: "Ошибка", running: "Выполняется", never: "Не запускался" };
-const SOURCE_STATUS = { ok: "Работает", error: "Недоступен", unknown: "Ожидает проверки", waiting: "Ожидает данных" };
+const BACKUP_STATUS = { ok: t("Успешно"), failed: t("Ошибка"), running: t("Выполняется"), never: t("Не запускался") };
+const SOURCE_STATUS = { ok: t("Работает"), error: t("Недоступен"), unknown: t("Ожидает проверки"), waiting: t("Ожидает данных") };
 
 const ICONS = {
   eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
@@ -53,6 +107,7 @@ const ICONS = {
   moon: '<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   chart: '<path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>',
   server: '<rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
 };
 
@@ -111,7 +166,7 @@ function bridge() {
 }
 
 async function api(path, opts = {}) {
-  const headers = {};
+  const headers = { "X-Lang": LANG };
   if (S.token) headers.Authorization = "Bearer " + S.token;
   let body = opts.body;
   if (body !== undefined && !(body instanceof FormData)) {
@@ -122,7 +177,7 @@ async function api(path, opts = {}) {
   try {
     res = await fetch(path, { method: opts.method || (body !== undefined ? "POST" : "GET"), headers, body });
   } catch (e) {
-    throw new Error("Сервер недоступен");
+    throw new Error(t("Сервер недоступен"));
   }
   const text = await res.text();
   let data = null;
@@ -133,10 +188,10 @@ async function api(path, opts = {}) {
   }
   if (res.status === 401 && S.token && !opts.silent401) {
     logoutLocal();
-    throw new Error("Сессия завершена, войдите снова");
+    throw new Error(t("Сессия завершена, войдите снова"));
   }
   if (!res.ok) {
-    const detail = data && data.detail ? data.detail : "Ошибка " + res.status;
+    const detail = data && data.detail ? data.detail : t("Ошибка ") + res.status;
     throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
   }
   return data;
@@ -182,7 +237,7 @@ function modal({ title, subtitle, body, foot, wide, onClose }) {
         "div",
         { class: "modal-head" },
         h("div", null, h("h2", null, title), subtitle ? h("div", { class: "muted small" }, subtitle) : null),
-        h("button", { class: "icon-btn", onclick: close, title: "Закрыть" }, icon("x"))
+        h("button", { class: "icon-btn", onclick: close, title: t("Закрыть") }, icon("x"))
       ),
       h("div", { class: "modal-body" }, body),
       foot && foot.length ? h("div", { class: "modal-foot" }, foot) : null
@@ -193,12 +248,12 @@ function modal({ title, subtitle, body, foot, wide, onClose }) {
   return { close, el: backdrop };
 }
 
-function confirmDialog(text, action, label = "Удалить") {
+function confirmDialog(text, action, label = t("Удалить")) {
   const m = modal({
-    title: "Подтверждение",
+    title: t("Подтверждение"),
     body: h("p", null, text),
     foot: [
-      h("button", { class: "btn", onclick: () => m.close() }, "Отмена"),
+      h("button", { class: "btn", onclick: () => m.close() }, t("Отмена")),
       h("button", { class: "btn primary", onclick: async () => { m.close(); await action(); } }, label),
     ],
   });
@@ -211,7 +266,7 @@ function parseDate(iso) {
 function fmtDate(iso, withYear = false) {
   const d = parseDate(iso);
   if (!d) return "—";
-  return d.toLocaleString("ru-RU", {
+  return d.toLocaleString(LOCALE, {
     day: "2-digit",
     month: "2-digit",
     year: withYear ? "numeric" : undefined,
@@ -224,28 +279,28 @@ function ago(iso) {
   const d = parseDate(iso);
   if (!d) return "—";
   const sec = Math.round((Date.now() - d.getTime()) / 1000);
-  if (sec < 0) return "через " + duration(-sec);
-  if (sec < 45) return "только что";
-  return duration(sec) + " назад";
+  if (sec < 0) return t("через ") + duration(-sec);
+  if (sec < 45) return t("только что");
+  return duration(sec) + t(" назад");
 }
 
 function duration(sec) {
-  if (sec < 90) return Math.max(1, Math.round(sec / 60)) + " мин";
-  if (sec < 3600) return Math.round(sec / 60) + " мин";
-  if (sec < 86400) return Math.round(sec / 3600) + " ч";
-  return Math.round(sec / 86400) + " дн";
+  if (sec < 90) return Math.max(1, Math.round(sec / 60)) + t(" мин");
+  if (sec < 3600) return Math.round(sec / 60) + t(" мин");
+  if (sec < 86400) return Math.round(sec / 3600) + t(" ч");
+  return Math.round(sec / 86400) + t(" дн");
 }
 
-function humanSize(n) {
+function humanSize(n, digits = 1) {
   if (n === null || n === undefined) return "—";
-  const units = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
+  const units = [t("Б"), t("КБ"), t("МБ"), t("ГБ"), t("ТБ")];
   let v = Number(n);
   let i = 0;
   while (v >= 1024 && i < units.length - 1) {
     v /= 1024;
     i++;
   }
-  return (i === 0 ? v.toFixed(0) : v.toFixed(1)) + " " + units[i];
+  return (i === 0 ? v.toFixed(0) : v.toFixed(digits)) + " " + units[i];
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -262,25 +317,34 @@ function svg(tag, attrs, ...kids) {
   return el;
 }
 
-function formatMetric(value, unit) {
+function formatMetric(value, unit, digits) {
   if (value === null || value === undefined || Number.isNaN(value)) return "—";
-  const num = (v, digits) => Number(v).toLocaleString("ru-RU", { maximumFractionDigits: digits });
+  const num = (v, d) => Number(v).toLocaleString(LOCALE, { maximumFractionDigits: d });
+  const fixed = digits !== undefined;
   switch (unit) {
     case "bytes":
-      return humanSize(value);
+      return humanSize(value, fixed ? digits : 1);
     case "ms":
-      return num(Math.round(value), 0) + " мс";
+      return (fixed ? num(value, digits - 1) : num(Math.round(value), 0)) + t(" мс");
     case "sec":
-      return num(value, value >= 100 ? 0 : 1) + " с";
+      return num(value, fixed ? digits : value >= 100 ? 0 : 1) + t(" с");
     case "mb":
-      return humanSize(value * 1024 * 1024);
+      return humanSize(value * 1024 * 1024, fixed ? digits : 1);
     case "gb":
-      return humanSize(value * 1024 * 1024 * 1024);
+      return humanSize(value * 1024 * 1024 * 1024, fixed ? digits : 1);
     case "percent":
-      return num(value, 1) + "%";
+      return num(value, fixed ? digits : 1) + "%";
     default:
-      return num(value, Number.isInteger(value) ? 0 : 1);
+      return num(value, fixed ? digits : Number.isInteger(value) ? 0 : 1);
   }
+}
+
+function tickLabels(ticks, unit) {
+  for (let digits = 1; digits <= 4; digits++) {
+    const labels = ticks.map((v) => formatMetric(v, unit, digits));
+    if (new Set(labels).size === labels.length) return labels;
+  }
+  return ticks.map((v) => formatMetric(v, unit, 4));
 }
 
 function niceTicks(min, max, count = 4) {
@@ -302,8 +366,8 @@ function niceTicks(min, max, count = 4) {
 
 function formatTick(ms, span) {
   const d = new Date(ms);
-  if (span <= 36 * 3600 * 1000) return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+  if (span <= 36 * 3600 * 1000) return d.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString(LOCALE, { day: "2-digit", month: "2-digit" });
 }
 
 function lineChart(points, unit, label) {
@@ -319,6 +383,7 @@ function lineChart(points, unit, label) {
     xMax += 3600 * 1000;
   }
   const ticks = niceTicks(Math.min(...ys), Math.max(...ys));
+  const labels = tickLabels(ticks, unit);
   const yMin = ticks[0];
   const yMax = ticks[ticks.length - 1];
   const x = (t) => M.left + ((t - xMin) / (xMax - xMin)) * (W - M.left - M.right);
@@ -352,9 +417,9 @@ function lineChart(points, unit, label) {
   const chart = svg(
     "svg",
     { viewBox: `0 0 ${W} ${H}`, class: "chart-svg", role: "img", "aria-label": label },
-    ticks.map((t) => [
+    ticks.map((t, i) => [
       svg("line", { class: "grid", x1: M.left, x2: W - M.right, y1: y(t), y2: y(t) }),
-      svg("text", { class: "axis", x: M.left - 8, y: y(t) + 4, "text-anchor": "end" }, formatMetric(t, unit)),
+      svg("text", { class: "axis", x: M.left - 8, y: y(t) + 4, "text-anchor": "end" }, labels[i]),
     ]),
     xTicks.map((t, i) => svg("text", { class: "axis", x: x(t), y: H - 8, "text-anchor": i === 0 ? "start" : i === 4 ? "end" : "middle" }, formatTick(t, span))),
     svg("path", { class: "area", d: area }),
@@ -445,34 +510,34 @@ async function openMetrics(source) {
   const table = h("div");
   async function load() {
     metricChips.replaceChildren(...series.map((s) => h("button", { class: "chip" + (st.name === s.name ? " active" : ""), onclick: () => { st.name = s.name; load(); } }, s.title)));
-    periodChips.replaceChildren(...[["24h", "24 часа"], ["7d", "7 дней"], ["30d", "30 дней"]].map(([v, t]) => h("button", { class: "chip" + (st.period === v ? " active" : ""), onclick: () => { st.period = v; load(); } }, t)));
+    periodChips.replaceChildren(...[["24h", t("24 часа")], ["7d", t("7 дней")], ["30d", t("30 дней")]].map(([v, t]) => h("button", { class: "chip" + (st.period === v ? " active" : ""), onclick: () => { st.period = v; load(); } }, t)));
     area.classList.add("loading");
     const result = await guard(() => api(`/api/sources/${source.id}/metrics/${encodeURIComponent(st.name)}?period=${st.period}`));
     area.classList.remove("loading");
     if (!result) return;
     if (!result.points.length) {
-      area.replaceChildren(emptyState("chart", "За выбранный период данных нет"));
+      area.replaceChildren(emptyState("chart", t("За выбранный период данных нет")));
       table.replaceChildren();
       return;
     }
-    area.replaceChildren(h("div", { class: "between", style: "margin-bottom:6px" }, h("strong", null, result.title), h("span", { class: "muted small" }, "Последнее значение: ", formatMetric(result.points[result.points.length - 1][1], result.unit))), lineChart(result.points, result.unit, result.title));
+    area.replaceChildren(h("div", { class: "between", style: "margin-bottom:6px" }, h("strong", null, result.title), h("span", { class: "muted small" }, t("Последнее значение: "), formatMetric(result.points[result.points.length - 1][1], result.unit))), lineChart(result.points, result.unit, result.title));
     table.replaceChildren(
       h(
         "details",
         null,
-        h("summary", { class: "muted small", style: "cursor:pointer" }, "Таблица значений"),
+        h("summary", { class: "muted small", style: "cursor:pointer" }, t("Таблица значений")),
         h(
           "div",
           { class: "table-wrap", style: "max-height:260px;overflow-y:auto;margin-top:8px" },
-          h("table", { class: "table" }, h("thead", null, h("tr", null, h("th", null, "Время"), h("th", { class: "right" }, result.title))), h("tbody", null, result.points.slice().reverse().map((p) => h("tr", null, h("td", null, fmtDate(p[0])), h("td", { class: "right mono" }, formatMetric(p[1], result.unit))))))
+          h("table", { class: "table" }, h("thead", null, h("tr", null, h("th", null, t("Время")), h("th", { class: "right" }, result.title))), h("tbody", null, result.points.slice().reverse().map((p) => h("tr", null, h("td", null, fmtDate(p[0])), h("td", { class: "right mono" }, formatMetric(p[1], result.unit))))))
         )
       )
     );
   }
   const body = series.length
     ? h("div", { class: "stack" }, h("div", { class: "row" }, periodChips, h("span", { class: "tab-sep", style: "height:22px;margin:0 4px" }), metricChips), area, table)
-    : emptyState("chart", "Данных пока нет — значения сохраняются при опросе источника, не чаще раза в 5 минут");
-  modal({ title: data.source.name, subtitle: "Графики метрик", body, wide: true });
+    : emptyState("chart", t("Данных пока нет — значения сохраняются при опросе источника, не чаще раза в 5 минут"));
+  modal({ title: data.source.name, subtitle: t("Графики метрик"), body, wide: true });
   if (series.length) load();
 }
 
@@ -544,7 +609,7 @@ function copyField(value) {
           inp.select();
           document.execCommand("copy");
         }
-        toast("Скопировано");
+        toast(t("Скопировано"));
       },
     }, icon("copy"))
   );
@@ -576,18 +641,18 @@ function connectorOf(type) {
 }
 
 const TABS = [
-  { id: "overview", title: "Обзор", show: () => true },
-  { id: "monitoring", title: "Мониторинг", show: () => can("monitoring.view"), cat: "monitoring" },
-  { id: "databases", title: "Базы данных", show: () => can("databases.view"), cat: "database" },
-  { id: "onec", title: "1С", show: () => can("onec.view"), cat: "onec" },
-  { id: "backups", title: "Бэкапы", show: () => can("backups.view"), cat: "backup" },
-  { id: "bugs", title: "Ошибки", show: () => can("bugs.view") || can("bugs.report"), cat: "bug" },
-  { id: "journal", title: "Журнал", show: () => VIEW_PERMS.some(can) },
+  { id: "overview", title: t("Обзор"), show: () => true },
+  { id: "monitoring", title: t("Мониторинг"), show: () => can("monitoring.view"), cat: "monitoring" },
+  { id: "databases", title: t("Базы данных"), show: () => can("databases.view"), cat: "database" },
+  { id: "onec", title: t("1С"), show: () => can("onec.view"), cat: "onec" },
+  { id: "backups", title: t("Бэкапы"), show: () => can("backups.view"), cat: "backup" },
+  { id: "bugs", title: t("Ошибки"), show: () => can("bugs.view") || can("bugs.report"), cat: "bug" },
+  { id: "journal", title: t("Журнал"), show: () => VIEW_PERMS.some(can) },
   { sep: true, show: () => ["sources.manage", "rules.manage", "users.manage", "settings.manage"].some(can) },
-  { id: "sources", title: "Источники", show: () => can("sources.manage") },
-  { id: "rules", title: "Правила", show: () => can("rules.manage") },
-  { id: "users", title: "Пользователи", show: () => can("users.manage") },
-  { id: "settings", title: "Настройки", show: () => can("settings.manage") },
+  { id: "sources", title: t("Источники"), show: () => can("sources.manage") },
+  { id: "rules", title: t("Правила"), show: () => can("rules.manage") },
+  { id: "users", title: t("Пользователи"), show: () => can("users.manage") },
+  { id: "settings", title: t("Настройки"), show: () => can("settings.manage") },
 ];
 
 function allowedRoute(route) {
@@ -613,7 +678,7 @@ function cycleTheme() {
   const next = order[(order.indexOf(store("ow_theme")) + 1) % order.length];
   store("ow_theme", next);
   applyTheme();
-  toast("Тема: " + ({ "": "как в системе", light: "светлая", dark: "тёмная" }[next]));
+  toast("Тема: " + ({ "": t("как в системе"), light: t("светлая"), dark: t("тёмная") }[next]));
 }
 
 async function boot() {
@@ -631,6 +696,7 @@ async function boot() {
   if (S.token) {
     try {
       S.me = await api("/api/auth/me");
+      if (await syncLanguage()) return;
       S.meta = await api("/api/meta");
     } catch (e) {
       S.token = "";
@@ -694,7 +760,7 @@ function topbar() {
     h(
       "div",
       { class: "top-actions" },
-      h("button", { class: "icon-btn", title: "Уведомления", "data-dropdown": "1", onclick: toggleNotifications }, icon("bell"), h("span", { class: "badge-dot hidden", id: "bell-count" })),
+      h("button", { class: "icon-btn", title: t("Уведомления"), "data-dropdown": "1", onclick: toggleNotifications }, icon("bell"), h("span", { class: "badge-dot hidden", id: "bell-count" })),
       h("button", { class: "user-chip", "data-dropdown": "1", title: S.me.full_name || S.me.username, onclick: toggleUserMenu }, h("span", { class: "avatar" }, initials))
     )
   );
@@ -732,11 +798,12 @@ function toggleUserMenu() {
   S.dropdown = h(
     "div",
     { class: "dropdown", style: "width:260px" },
-    h("div", { class: "dropdown-head" }, h("div", { style: "font-weight:600" }, S.me.full_name || S.me.username), h("div", { class: "muted small" }, (S.me.role && S.me.role.title) || "Без роли", " · ", S.me.username)),
-    item("user", "Профиль и уведомления", () => navigate("profile")),
-    item("moon", "Сменить тему", cycleTheme),
-    bridge() ? item("server", "Сменить сервер", () => bridge().change_server()) : null,
-    item("logout", "Выйти", logout)
+    h("div", { class: "dropdown-head" }, h("div", { style: "font-weight:600" }, S.me.full_name || S.me.username), h("div", { class: "muted small" }, (S.me.role && S.me.role.title) || t("Без роли"), " · ", S.me.username)),
+    item("user", t("Профиль и уведомления"), () => navigate("profile")),
+    item("moon", t("Сменить тему"), cycleTheme),
+    item("globe", LANG === "ru" ? "English" : "Русский", () => setLanguage(LANG === "ru" ? "en" : "ru")),
+    bridge() ? item("server", t("Сменить сервер"), () => bridge().change_server()) : null,
+    item("logout", t("Выйти"), logout)
   );
   S.dropdown.dataset.kind = "user";
   document.body.append(S.dropdown);
@@ -752,7 +819,7 @@ async function toggleNotifications() {
     h(
       "div",
       { class: "dropdown-head between" },
-      h("strong", null, "Уведомления"),
+      h("strong", null, t("Уведомления")),
       h("button", {
         class: "btn sm ghost",
         onclick: async () => {
@@ -761,7 +828,7 @@ async function toggleNotifications() {
           updateBadges();
           list.querySelectorAll(".notif").forEach((n) => n.classList.remove("unread"));
         },
-      }, "Прочитать все")
+      }, t("Прочитать все"))
     ),
     list
   );
@@ -770,7 +837,7 @@ async function toggleNotifications() {
   const data = await guard(() => api("/api/notifications?limit=40"));
   if (!data) return;
   list.replaceChildren();
-  if (!data.items.length) list.append(emptyState("inbox", "Уведомлений пока нет"));
+  if (!data.items.length) list.append(emptyState("inbox", t("Уведомлений пока нет")));
   for (const n of data.items) {
     list.append(
       h(
@@ -879,9 +946,9 @@ function authView() {
   }
 
   function loginForm() {
-    const u = input({ autocomplete: "username", placeholder: "Логин", required: true, autofocus: true });
-    const p = input({ type: "password", autocomplete: "current-password", placeholder: "Пароль", required: true });
-    const btn = h("button", { class: "btn primary block", type: "submit" }, "Войти");
+    const u = input({ autocomplete: "username", placeholder: t("Логин"), required: true, autofocus: true });
+    const p = input({ type: "password", autocomplete: "current-password", placeholder: t("Пароль"), required: true });
+    const btn = h("button", { class: "btn primary block", type: "submit" }, t("Войти"));
     return h(
       "form",
       {
@@ -893,6 +960,7 @@ function authView() {
             S.token = r.token;
             store("ow_token", r.token);
             S.me = r.user;
+            if (await syncLanguage()) return;
             S.meta = await api("/api/meta");
             render();
           } catch (err) {
@@ -902,34 +970,34 @@ function authView() {
           }
         },
       },
-      field("Логин", u),
-      field("Пароль", p),
+      field(t("Логин"), u),
+      field(t("Пароль"), p),
       btn
     );
   }
 
   function registerForm() {
-    const fn = input({ placeholder: "Иван Петров", autocomplete: "name" });
+    const fn = input({ placeholder: t("Иван Петров"), autocomplete: "name" });
     const u = input({ placeholder: "ivan.petrov", autocomplete: "username", required: true });
     const p = input({ type: "password", autocomplete: "new-password", required: true });
     const p2 = input({ type: "password", autocomplete: "new-password", required: true });
     const tg = input({ placeholder: "@username" });
-    const btn = h("button", { class: "btn primary block", type: "submit" }, "Отправить заявку");
+    const btn = h("button", { class: "btn primary block", type: "submit" }, t("Отправить заявку"));
     return h(
       "form",
       {
         onsubmit: async (e) => {
           e.preventDefault();
           if (p.value !== p2.value) {
-            notice.replaceChildren(h("div", { class: "notice critical" }, icon("alert"), h("div", null, "Пароли не совпадают")));
+            notice.replaceChildren(h("div", { class: "notice critical" }, icon("alert"), h("div", null, t("Пароли не совпадают"))));
             return;
           }
           btn.disabled = true;
           try {
-            const r = await api("/api/auth/register", { body: { full_name: fn.value, username: u.value.trim(), password: p.value, telegram_username: tg.value } });
+            const r = await api("/api/auth/register", { body: { full_name: fn.value, username: u.value.trim(), password: p.value, telegram_username: tg.value, language: LANG } });
             mode = "login";
             draw();
-            notice.replaceChildren(h("div", { class: "notice" }, icon("info"), h("div", null, r.message, " Вы уже можете войти и привязать Telegram в профиле.")));
+            notice.replaceChildren(h("div", { class: "notice" }, icon("info"), h("div", null, r.message, t(" Вы уже можете войти и привязать Telegram в профиле."))));
           } catch (err) {
             notice.replaceChildren(h("div", { class: "notice critical" }, icon("alert"), h("div", null, err.message)));
           } finally {
@@ -937,10 +1005,10 @@ function authView() {
           }
         },
       },
-      field("Имя и фамилия", fn),
-      field("Логин", u, "Латиница, цифры, точка, дефис"),
-      h("div", { class: "grid-2", style: "gap:10px" }, field("Пароль", p), field("Повторите пароль", p2)),
-      field("Telegram (необязательно)", tg),
+      field(t("Имя и фамилия"), fn),
+      field(t("Логин"), u, t("Латиница, цифры, точка, дефис")),
+      h("div", { class: "grid-2", style: "gap:10px" }, field(t("Пароль"), p), field(t("Повторите пароль"), p2)),
+      field(t("Telegram (необязательно)"), tg),
       btn
     );
   }
@@ -948,8 +1016,8 @@ function authView() {
   const seg = h(
     "div",
     { class: "segmented" },
-    h("button", { type: "button", "data-mode": "login", onclick: () => { mode = "login"; notice.replaceChildren(); draw(); } }, "Вход"),
-    h("button", { type: "button", "data-mode": "register", disabled: !registration, onclick: () => { mode = "register"; notice.replaceChildren(); draw(); } }, "Регистрация")
+    h("button", { type: "button", "data-mode": "login", onclick: () => { mode = "login"; notice.replaceChildren(); draw(); } }, t("Вход")),
+    h("button", { type: "button", "data-mode": "register", disabled: !registration, onclick: () => { mode = "register"; notice.replaceChildren(); draw(); } }, t("Регистрация"))
   );
   draw();
   return h(
@@ -958,15 +1026,17 @@ function authView() {
     h(
       "div",
       { class: "auth-card" },
-      h("div", { class: "auth-brand" }, h("span", { class: "brand-mark" }, icon("eye")), h("h1", null, "OpsWatch"), h("div", { class: "muted" }, "Мониторинг, резервные копии и уведомления для системных администраторов и 1С")),
+      h("div", { class: "auth-brand" }, h("span", { class: "brand-mark" }, icon("eye")), h("h1", null, "OpsWatch"), h("div", { class: "muted" }, t("Мониторинг, резервные копии и уведомления для системных администраторов и 1С"))),
       h("div", { class: "panel" }, h("div", { class: "panel-body" }, seg, notice, box)),
       h(
         "div",
         { class: "row muted small", style: "justify-content:center;margin-top:14px" },
-        h("span", null, "Сервер: " + location.host),
+        h("span", null, t("Сервер: ") + location.host),
         h("span", null, "·"),
         h("span", null, "v" + ((S.meta && S.meta.version) || "")),
-        bridge() ? h("a", { href: "#", onclick: (e) => { e.preventDefault(); bridge().change_server(); } }, "Сменить сервер") : null
+        h("span", null, "·"),
+        Object.entries(LANGS).map(([code, title]) => (code === LANG ? h("strong", null, title) : h("a", { href: "#", onclick: (e) => { e.preventDefault(); setLanguage(code, false); } }, title))),
+        bridge() ? h("a", { href: "#", onclick: (e) => { e.preventDefault(); bridge().change_server(); } }, t("Сменить сервер")) : null
       )
     )
   );
@@ -993,14 +1063,14 @@ async function renderPage() {
 }
 
 function eventsTable(items, opts = {}) {
-  if (!items.length) return emptyState("check", opts.empty || "Событий нет");
+  if (!items.length) return emptyState("check", opts.empty || t("Событий нет"));
   return h(
     "div",
     { class: "table-wrap" },
     h(
       "table",
       { class: "table" },
-      h("thead", null, h("tr", null, h("th", null, "Важность"), h("th", null, "Событие"), opts.category === false ? null : h("th", null, "Категория"), h("th", null, "Статус"), h("th", { class: "right" }, "Когда"))),
+      h("thead", null, h("tr", null, h("th", null, t("Важность")), h("th", null, t("Событие")), opts.category === false ? null : h("th", null, t("Категория")), h("th", null, t("Статус")), h("th", { class: "right" }, t("Когда")))),
       h(
         "tbody",
         null,
@@ -1020,7 +1090,7 @@ function eventsTable(items, opts = {}) {
   );
 }
 
-function eventsPanel({ category = "", title = "События", allowCategoryFilter = false, defaultStatus = "open" }) {
+function eventsPanel({ category = "", title = t("События"), allowCategoryFilter = false, defaultStatus = "open" }) {
   const st = { status: defaultStatus, severity: "", q: "", offset: 0, limit: 50, category };
   const body = h("div", null, loading());
   const counter = h("span", { class: "muted small" });
@@ -1037,11 +1107,11 @@ function eventsPanel({ category = "", title = "События", allowCategoryFil
   }
 
   function drawChips() {
-    chips(statusChips, [["open", "Открытые"], ["", "Все"], ["resolved", "Решённые"]], "status");
-    chips(sevChips, [["", "Любая важность"], ["critical", "Критично"], ["warning", "Предупреждения"], ["info", "Информация"]], "severity");
+    chips(statusChips, [["open", t("Открытые")], ["", t("Все")], ["resolved", t("Решённые")]], "status");
+    chips(sevChips, [["", t("Любая важность")], ["critical", t("Критично")], ["warning", t("Предупреждения")], ["info", t("Информация")]], "severity");
     if (allowCategoryFilter) {
       const cats = (S.meta.categories || []).filter((c) => can({ monitoring: "monitoring.view", database: "databases.view", onec: "onec.view", backup: "backups.view", bug: "bugs.view", system: "system.view" }[c.id]));
-      chips(catChips, [["", "Все категории"], ...cats.map((c) => [c.id, c.title])], "category");
+      chips(catChips, [["", t("Все категории")], ...cats.map((c) => [c.id, c.title])], "category");
     }
   }
 
@@ -1049,7 +1119,7 @@ function eventsPanel({ category = "", title = "События", allowCategoryFil
   const search = input({
     type: "search",
     class: "search",
-    placeholder: "Поиск…",
+    placeholder: t("Поиск…"),
     oninput: (e) => {
       clearTimeout(timer);
       timer = setTimeout(() => { st.q = e.target.value; st.offset = 0; load(); }, 300);
@@ -1064,22 +1134,22 @@ function eventsPanel({ category = "", title = "События", allowCategoryFil
     if (st.q) params.set("q", st.q);
     const data = await guard(() => api("/api/events?" + params));
     if (!data) return;
-    counter.textContent = "Всего: " + data.total;
+    counter.textContent = t("Всего: ") + data.total;
     const pager =
       data.total > st.limit
         ? h(
             "div",
             { class: "pager" },
-            h("span", { class: "muted small" }, `${st.offset + 1}–${Math.min(st.offset + st.limit, data.total)} из ${data.total}`),
+            h("span", { class: "muted small" }, t("{from}–{to} из {total}", { from: st.offset + 1, to: Math.min(st.offset + st.limit, data.total), total: data.total })),
             h(
               "div",
               { class: "row" },
-              h("button", { class: "btn sm", disabled: st.offset === 0, onclick: () => { st.offset = Math.max(0, st.offset - st.limit); load(); } }, "Назад"),
-              h("button", { class: "btn sm", disabled: st.offset + st.limit >= data.total, onclick: () => { st.offset += st.limit; load(); } }, "Вперёд")
+              h("button", { class: "btn sm", disabled: st.offset === 0, onclick: () => { st.offset = Math.max(0, st.offset - st.limit); load(); } }, t("Назад")),
+              h("button", { class: "btn sm", disabled: st.offset + st.limit >= data.total, onclick: () => { st.offset += st.limit; load(); } }, t("Вперёд"))
             )
           )
         : null;
-    fill(body, eventsTable(data.items, { category: !category, empty: st.status === "open" ? "Открытых событий нет — всё спокойно" : "Событий не найдено" }), pager);
+    fill(body, eventsTable(data.items, { category: !category, empty: st.status === "open" ? t("Открытых событий нет — всё спокойно") : t("Событий не найдено") }), pager);
   }
 
   drawChips();
@@ -1097,15 +1167,16 @@ function eventsPanel({ category = "", title = "События", allowCategoryFil
 function metricBadges(source) {
   const m = source.metrics || {};
   const items = [];
-  if (m.size_human) items.push(m.size_human);
+  if (typeof m.size === "number") items.push(humanSize(m.size));
+  else if (m.size_human) items.push(m.size_human);
   if (m.version) items.push(m.version);
-  if (m.latency_ms !== undefined) items.push(m.latency_ms + " мс");
+  if (m.latency_ms !== undefined) items.push(m.latency_ms + t(" мс"));
   if (m.status) items.push("HTTP " + m.status);
-  if (m.problems !== undefined) items.push("Проблем: " + m.problems);
-  if (m.in_use !== undefined) items.push(m.in_use ? "Есть пользователи" : "Пользователей нет");
+  if (m.problems !== undefined) items.push(t("Проблем: ") + m.problems);
+  if (m.in_use !== undefined) items.push(m.in_use ? t("Есть пользователи") : t("Пользователей нет"));
   if (m.http) items.push(m.http);
-  if (m.log_matches) items.push("Ошибок в журнале: " + m.log_matches);
-  if (m.received !== undefined) items.push("Получено: " + m.received);
+  if (m.log_matches) items.push(t("Ошибок в журнале: ") + m.log_matches);
+  if (m.received !== undefined) items.push(t("Получено: ") + m.received);
   return items.map((t) => h("span", { class: "badge outline" }, t));
 }
 
@@ -1114,31 +1185,31 @@ function sourceCard(source, reload, spark) {
   return h(
     "div",
     { class: "source-card" },
-    h("div", { class: "between" }, h("div", { class: "name" }, h("span", { class: "dot " + status }), source.name), source.enabled ? null : h("span", { class: "badge" }, "Выключен")),
+    h("div", { class: "between" }, h("div", { class: "name" }, h("span", { class: "dot " + status }), source.name), source.enabled ? null : h("span", { class: "badge" }, t("Выключен"))),
     h("div", { class: "muted small" }, source.type_title, " · ", SOURCE_STATUS[status] || status),
     h("div", { class: "metrics" }, metricBadges(source)),
     spark
-      ? h("button", { class: "spark-btn", title: "Открыть график", onclick: () => openMetrics(source) }, sparkline(spark.values, spark.title + " за 24 часа"), h("span", { class: "muted small" }, spark.title, " · 24 ч"))
+      ? h("button", { class: "spark-btn", title: t("Открыть график"), onclick: () => openMetrics(source) }, sparkline(spark.values, spark.title + t(" за 24 часа")), h("span", { class: "muted small" }, spark.title, t(" · 24 ч")))
       : null,
     source.last_error ? h("div", { class: "error-text" }, source.last_error.slice(0, 220)) : null,
     h(
       "div",
       { class: "between" },
-      h("span", { class: "faint small" }, source.last_check_at ? "Проверено " + ago(source.last_check_at) : source.passive ? "Принимает webhook" : "Ещё не проверялся"),
+      h("span", { class: "faint small" }, source.last_check_at ? t("Проверено ") + ago(source.last_check_at) : source.passive ? t("Принимает webhook") : t("Ещё не проверялся")),
       h(
         "div",
         { class: "row", style: "gap:2px" },
-        source.passive ? null : h("button", { class: "btn sm ghost", title: "Графики", onclick: () => openMetrics(source) }, icon("chart")),
+        source.passive ? null : h("button", { class: "btn sm ghost", title: t("Графики"), onclick: () => openMetrics(source) }, icon("chart")),
       can("sources.manage") && !source.passive
         ? h("button", {
             class: "btn sm ghost",
             onclick: async (e) => {
               e.target.disabled = true;
               const r = await guard(() => api(`/api/sources/${source.id}/poll`, { body: {} }));
-              if (r) toast(r.ok ? "Проверено: " + (r.message || "OK") : "Ошибка: " + r.message, r.ok ? "" : "error");
+              if (r) toast(r.ok ? t("Проверено: ") + (r.message || "OK") : t("Ошибка: ") + r.message, r.ok ? "" : "error");
               reload();
             },
-          }, icon("refresh"), "Проверить")
+          }, icon("refresh"), t("Проверить"))
         : null
       )
     )
@@ -1159,24 +1230,24 @@ async function pageOverview(root) {
   }
   const backupsOk = d.backups.filter((b) => b.last_status === "ok").length;
   const backupsFailed = d.backups.filter((b) => b.last_status === "failed").length;
-  append(root, pageHead("Обзор", "Состояние инфраструктуры и последние события", h("button", { class: "btn", onclick: renderPage }, icon("refresh"), "Обновить")));
+  append(root, pageHead(t("Обзор"), t("Состояние инфраструктуры и последние события"), h("button", { class: "btn", onclick: renderPage }, icon("refresh"), t("Обновить"))));
   if (can("settings.manage") && d.bot.status !== "running") {
     root.append(
-      h("div", { class: "notice warning" }, icon("alert"), h("div", null, d.bot.status === "error" ? "Telegram-бот не запущен: " + d.bot.error : "Telegram-бот не настроен — уведомления приходят только в программу.", " ", h("a", { href: "#/settings" }, "Открыть настройки")))
+      h("div", { class: "notice warning" }, icon("alert"), h("div", null, d.bot.status === "error" ? t("Telegram-бот не запущен: ") + d.bot.error : t("Telegram-бот не настроен — уведомления приходят только в программу."), " ", h("a", { href: "#/settings" }, t("Открыть настройки"))))
     );
   }
   if (S.me.username === "admin1" && S.me.is_superuser) {
-    root.append(h("div", { class: "notice" }, icon("shield"), h("div", null, "Если вы ещё не меняли пароль администратора по умолчанию, сделайте это в ", h("a", { href: "#/profile" }, "профиле"), ".")));
+    root.append(h("div", { class: "notice" }, icon("shield"), h("div", null, t("Если вы ещё не меняли пароль администратора по умолчанию, сделайте это в "), h("a", { href: "#/profile" }, t("профиле")), ".")));
   }
   const kpi = (label, value, cls) => h("div", { class: "kpi" }, h("div", { class: "label" }, label), h("div", { class: "value " + (cls || "") }, value));
   root.append(
     h(
       "div",
       { class: "kpis" },
-      kpi("Критичных открыто", critical, critical ? "critical" : "ok"),
-      kpi("Предупреждений", warning, warning ? "warning" : ""),
-      kpi("Источники в норме", sourcesTotal ? `${sourcesOk} / ${sourcesTotal}` : "—", sourcesTotal && sourcesOk === sourcesTotal ? "ok" : sourcesTotal ? "warning" : ""),
-      can("backups.view") ? kpi("Бэкапы", d.backups.length ? `${backupsOk} / ${d.backups.length}` : "—", backupsFailed ? "critical" : d.backups.length ? "ok" : "") : null
+      kpi(t("Критичных открыто"), critical, critical ? "critical" : "ok"),
+      kpi(t("Предупреждений"), warning, warning ? "warning" : ""),
+      kpi(t("Источники в норме"), sourcesTotal ? `${sourcesOk} / ${sourcesTotal}` : "—", sourcesTotal && sourcesOk === sourcesTotal ? "ok" : sourcesTotal ? "warning" : ""),
+      can("backups.view") ? kpi(t("Бэкапы"), d.backups.length ? `${backupsOk} / ${d.backups.length}` : "—", backupsFailed ? "critical" : d.backups.length ? "ok" : "") : null
     )
   );
   const grid = h("div", { class: "cat-grid" });
@@ -1187,8 +1258,8 @@ async function pageOverview(root) {
         "div",
         { class: "cat-card", onclick: () => navigate(CAT_TAB[cat] || "journal") },
         h("div", { class: "head" }, icon(CAT_ICON[cat]), CAT[cat]),
-        h("div", { class: "row" }, badges.length ? badges : h("span", { class: "badge ok" }, "Всё спокойно")),
-        c.sources.total ? h("div", { class: "muted small", style: "margin-top:8px" }, `Источников: ${c.sources.total}`, c.sources.error ? h("span", { style: "color:var(--critical)" }, ` · недоступно: ${c.sources.error}`) : null) : null
+        h("div", { class: "row" }, badges.length ? badges : h("span", { class: "badge ok" }, t("Всё спокойно"))),
+        c.sources.total ? h("div", { class: "muted small", style: "margin-top:8px" }, t("Источников: {n}", { n: c.sources.total }), c.sources.error ? h("span", { style: "color:var(--critical)" }, " · " + t("недоступно: {n}", { n: c.sources.error })) : null) : null
       )
     );
   }
@@ -1196,20 +1267,20 @@ async function pageOverview(root) {
   if (d.failing_sources.length) {
     root.append(
       panel(
-        "Недоступные источники",
+        t("Недоступные источники"),
         null,
         h("div", { class: "stack" }, d.failing_sources.map((s) => h("div", { class: "row" }, h("span", { class: "dot error" }), h("strong", null, s.name), h("span", { class: "muted small" }, s.error))))
       )
     );
   }
-  root.append(panel("Последние события", h("a", { href: "#/journal", class: "small" }, "Весь журнал →"), eventsTable(d.recent, { empty: "Событий пока нет" }), true));
+  root.append(panel(t("Последние события"), h("a", { href: "#/journal", class: "small" }, t("Весь журнал →")), eventsTable(d.recent, { empty: t("Событий пока нет") }), true));
   S.refresh = renderPage;
 }
 
 function categoryPage(cat, title, subtitle) {
   return async (root) => {
     const sources = await api("/api/sources?category=" + cat);
-    const actions = can("sources.manage") ? h("button", { class: "btn", onclick: () => sourceForm(null, cat) }, icon("plus"), "Источник") : null;
+    const actions = can("sources.manage") ? h("button", { class: "btn", onclick: () => sourceForm(null, cat) }, icon("plus"), t("Источник")) : null;
     append(root, pageHead(title, subtitle, actions));
     const grid = h("div", { class: "sources-grid" });
     let sparks = await api("/api/metrics/sparklines?category=" + cat).catch(() => ({}));
@@ -1225,9 +1296,9 @@ function categoryPage(cat, title, subtitle) {
     drawSources(sources.items);
     root.append(grid);
     if (!sources.items.length) {
-      root.append(h("div", { class: "notice" }, icon("info"), h("div", null, "Источники этой категории ещё не подключены.", can("sources.manage") ? " Добавьте их на вкладке «Источники»." : "")));
+      root.append(h("div", { class: "notice" }, icon("info"), h("div", null, t("Источники этой категории ещё не подключены."), can("sources.manage") ? t(" Добавьте их на вкладке «Источники».") : "")));
     }
-    const events = eventsPanel({ category: cat, title: "События" });
+    const events = eventsPanel({ category: cat, title: t("События") });
     root.append(events.el);
     S.refresh = () => {
       reloadSources();
@@ -1237,29 +1308,29 @@ function categoryPage(cat, title, subtitle) {
 }
 
 async function pageJournal(root) {
-  append(root, pageHead("Журнал событий", "Все события, доступные вашей роли"));
-  const events = eventsPanel({ title: "События", allowCategoryFilter: true, defaultStatus: "" });
+  append(root, pageHead(t("Журнал событий"), t("Все события, доступные вашей роли")));
+  const events = eventsPanel({ title: t("События"), allowCategoryFilter: true, defaultStatus: "" });
   root.append(events.el);
   S.refresh = events.load;
 }
 
 async function pageBugs(root) {
-  append(root, pageHead("Ошибки и баг-репорты", "Сообщения об ошибках от пользователей и систем"));
+  append(root, pageHead(t("Ошибки и баг-репорты"), t("Сообщения об ошибках от пользователей и систем")));
   if (can("bugs.report")) {
-    const title = input({ placeholder: "Кратко: что случилось" });
-    const text = h("textarea", { placeholder: "Подробно: что делали, что ожидали, что получили. Можно указать базу, документ, время." });
-    const sev = select([["info", "Не срочно"], ["warning", "Мешает работе"], ["critical", "Работа остановлена"]], "warning");
+    const title = input({ placeholder: t("Кратко: что случилось") });
+    const text = h("textarea", { placeholder: t("Подробно: что делали, что ожидали, что получили. Можно указать базу, документ, время.") });
+    const sev = select([["info", t("Не срочно")], ["warning", t("Мешает работе")], ["critical", t("Работа остановлена")]], "warning");
     const files = h("input", { type: "file", multiple: true, accept: "image/*,.txt,.log,.pdf,.zip,.7z,.json,.xml,.csv,.docx,.xlsx,.mxl,.epf,.erf" });
-    const btn = h("button", { class: "btn primary" }, icon("send"), "Отправить");
+    const btn = h("button", { class: "btn primary" }, icon("send"), t("Отправить"));
     btn.onclick = async () => {
-      if (!title.value.trim() && !text.value.trim()) return toast("Опишите проблему", "error");
+      if (!title.value.trim() && !text.value.trim()) return toast(t("Опишите проблему"), "error");
       const form = new FormData();
       form.append("title", title.value);
       form.append("text", text.value);
       form.append("severity", sev.value);
       for (const f of files.files) form.append("files", f);
       btn.disabled = true;
-      const r = await guard(() => api("/api/bugs", { body: form }), "Баг-репорт отправлен");
+      const r = await guard(() => api("/api/bugs", { body: form }), t("Баг-репорт отправлен"));
       btn.disabled = false;
       if (r) {
         title.value = "";
@@ -1268,25 +1339,25 @@ async function pageBugs(root) {
         if (S.refresh) S.refresh();
       }
     };
-    const hint = S.meta.bot_username ? h("span", { class: "muted small" }, "Или отправьте боту ", h("a", { href: `https://t.me/${S.meta.bot_username}`, target: "_blank" }, "@" + S.meta.bot_username), " команду /bug со скриншотом") : null;
+    const hint = S.meta.bot_username ? h("span", { class: "muted small" }, t("Или отправьте боту "), h("a", { href: `https://t.me/${S.meta.bot_username}`, target: "_blank" }, "@" + S.meta.bot_username), t(" команду /bug со скриншотом")) : null;
     root.append(
       panel(
-        "Сообщить об ошибке",
+        t("Сообщить об ошибке"),
         null,
-        h("div", null, h("div", { class: "grid-2" }, field("Заголовок", title), field("Срочность", sev)), field("Описание", text), field("Скриншоты и файлы", files, "До 5 файлов, не больше 20 МБ каждый"), h("div", { class: "between" }, hint || h("span"), btn))
+        h("div", null, h("div", { class: "grid-2" }, field(t("Заголовок"), title), field(t("Срочность"), sev)), field(t("Описание"), text), field(t("Скриншоты и файлы"), files, t("До 5 файлов, не больше 20 МБ каждый")), h("div", { class: "between" }, hint || h("span"), btn))
       )
     );
   }
   if (can("bugs.view")) {
-    const events = eventsPanel({ category: "bug", title: "Баг-репорты" });
+    const events = eventsPanel({ category: "bug", title: t("Баг-репорты") });
     root.append(events.el);
     S.refresh = events.load;
   } else {
     const box = h("div", null, loading());
-    root.append(panel("Мои обращения", null, box, true));
+    root.append(panel(t("Мои обращения"), null, box, true));
     const load = async () => {
       const data = await guard(() => api("/api/bugs/mine"));
-      if (data) box.replaceChildren(eventsTable(data.items, { category: false, empty: "Вы ещё не отправляли баг-репорты" }));
+      if (data) box.replaceChildren(eventsTable(data.items, { category: false, empty: t("Вы ещё не отправляли баг-репорты") }));
     };
     load();
     S.refresh = load;
@@ -1301,7 +1372,7 @@ async function openEvent(id) {
     toast(err.message, "error");
     return;
   }
-  const note = h("textarea", { placeholder: "Комментарий к решению (необязательно)", style: "min-height:60px" });
+  const note = h("textarea", { placeholder: t("Комментарий к решению (необязательно)"), style: "min-height:60px" });
   const manage = can("events.manage") && e.status !== "resolved";
   const kv = (k, v) => (v === null || v === undefined || v === "" ? null : [h("div", { class: "k" }, k), h("div", null, v)]);
   const attachments = (e.attachments || []).map((a) => {
@@ -1313,49 +1384,49 @@ async function openEvent(id) {
   const body = h(
     "div",
     { class: "stack" },
-    h("div", { class: "row" }, sevBadge(e.severity), statusBadge(e.status), h("span", { class: "badge outline" }, CAT[e.category] || e.category), e.escalation_level ? h("span", { class: "badge critical" }, "Эскалация: " + e.escalation_level) : null),
+    h("div", { class: "row" }, sevBadge(e.severity), statusBadge(e.status), h("span", { class: "badge outline" }, CAT[e.category] || e.category), e.escalation_level ? h("span", { class: "badge critical" }, t("Эскалация: ") + e.escalation_level) : null),
     h(
       "div",
       { class: "kv" },
-      kv("Источник", e.source_name),
-      kv("Тип", h("code", null, e.type)),
-      kv("Впервые", fmtDate(e.created_at, true)),
-      kv("Последний раз", fmtDate(e.last_seen_at, true)),
-      kv("Повторов", e.count > 1 ? String(e.count) : null),
-      kv("Отправитель", e.reporter),
-      kv("Принял", e.acked_by ? `${e.acked_by}, ${fmtDate(e.acked_at)}` : null),
-      kv("Решил", e.resolved_at ? `${e.resolved_by || "автоматически"}, ${fmtDate(e.resolved_at)}` : null)
+      kv(t("Источник"), e.source_name),
+      kv(t("Тип"), h("code", null, e.type)),
+      kv(t("Впервые"), fmtDate(e.created_at, true)),
+      kv(t("Последний раз"), fmtDate(e.last_seen_at, true)),
+      kv(t("Повторов"), e.count > 1 ? String(e.count) : null),
+      kv(t("Отправитель"), e.reporter),
+      kv(t("Принял"), e.acked_by ? `${e.acked_by}, ${fmtDate(e.acked_at)}` : null),
+      kv(t("Решил"), e.resolved_at ? `${e.resolved_by || t("автоматически")}, ${fmtDate(e.resolved_at)}` : null)
     ),
     e.message ? h("pre", null, e.message) : null,
     e.resolution ? h("div", { class: "notice" }, icon("check"), h("div", null, e.resolution)) : null,
-    details.length ? h("details", null, h("summary", { class: "muted small", style: "cursor:pointer" }, "Технические детали"), h("div", { class: "kv", style: "margin-top:8px" }, details.map(([k, v]) => kv(k, typeof v === "object" ? JSON.stringify(v) : String(v))))) : null,
-    attachments.length ? h("div", { class: "stack" }, h("div", { class: "label" }, "Вложения"), attachments) : null,
-    manage ? field("Комментарий", note) : null
+    details.length ? h("details", null, h("summary", { class: "muted small", style: "cursor:pointer" }, t("Технические детали")), h("div", { class: "kv", style: "margin-top:8px" }, details.map(([k, v]) => kv(k, typeof v === "object" ? JSON.stringify(v) : String(v))))) : null,
+    attachments.length ? h("div", { class: "stack" }, h("div", { class: "label" }, t("Вложения")), attachments) : null,
+    manage ? field(t("Комментарий"), note) : null
   );
   const actions = [];
   if (manage && e.status === "new") {
-    actions.push(h("button", { class: "btn", onclick: async () => { const r = await guard(() => api(`/api/events/${id}/ack`, { body: {} }), "Принято в работу"); if (r) { m.close(); openEvent(id); if (S.refresh) S.refresh(); } } }, icon("check"), "Принял"));
+    actions.push(h("button", { class: "btn", onclick: async () => { const r = await guard(() => api(`/api/events/${id}/ack`, { body: {} }), t("Принято в работу")); if (r) { m.close(); openEvent(id); if (S.refresh) S.refresh(); } } }, icon("check"), t("Принял")));
   }
   if (manage) {
-    actions.push(h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api(`/api/events/${id}/resolve`, { body: { note: note.value } }), "Событие закрыто"); if (r) { m.close(); if (S.refresh) S.refresh(); } } }, icon("check"), "Решено"));
+    actions.push(h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api(`/api/events/${id}/resolve`, { body: { note: note.value } }), t("Событие закрыто")); if (r) { m.close(); if (S.refresh) S.refresh(); } } }, icon("check"), t("Решено")));
   }
   const m = modal({ title: e.title, subtitle: "#" + e.id, body, foot: actions, wide: true });
 }
 
 async function pageBackups(root) {
   const manage = can("backups.manage");
-  append(root, pageHead("Резервное копирование", "Задания по расписанию, проверка архивов и отправка администраторам", manage ? h("button", { class: "btn primary", onclick: () => jobForm(null) }, icon("plus"), "Новое задание") : null));
+  append(root, pageHead(t("Резервное копирование"), t("Задания по расписанию, проверка архивов и отправка администраторам"), manage ? h("button", { class: "btn primary", onclick: () => jobForm(null) }, icon("plus"), t("Новое задание")) : null));
   const jobsBox = h("div", null, loading());
   const recordsBox = h("div", null, loading());
-  root.append(panel("Задания", null, jobsBox, true));
-  root.append(panel("История", null, recordsBox, true));
+  root.append(panel(t("Задания"), null, jobsBox, true));
+  root.append(panel(t("История"), null, recordsBox, true));
   let jobs = [];
 
   async function load() {
     const [j, r] = await Promise.all([api("/api/backups/jobs"), api("/api/backups/records?limit=60")]);
     jobs = j.items;
     if (!jobs.length) {
-      jobsBox.replaceChildren(emptyState("archive", manage ? "Заданий пока нет. Создайте первое задание резервного копирования." : "Заданий пока нет"));
+      jobsBox.replaceChildren(emptyState("archive", manage ? t("Заданий пока нет. Создайте первое задание резервного копирования.") : t("Заданий пока нет")));
     } else {
       jobsBox.replaceChildren(
         h(
@@ -1364,7 +1435,7 @@ async function pageBackups(root) {
           h(
             "table",
             { class: "table" },
-            h("thead", null, h("tr", null, h("th", null, "Задание"), h("th", null, "Расписание"), h("th", null, "Последний запуск"), h("th", null, "Хранить"), manage ? h("th", { class: "right" }, "") : null)),
+            h("thead", null, h("tr", null, h("th", null, t("Задание")), h("th", null, t("Расписание")), h("th", null, t("Последний запуск")), h("th", null, t("Хранить")), manage ? h("th", { class: "right" }, "") : null)),
             h(
               "tbody",
               null,
@@ -1374,18 +1445,18 @@ async function pageBackups(root) {
                 return h(
                   "tr",
                   null,
-                  h("td", { class: "title-cell" }, job.name, h("div", { class: "sub" }, job.source_name || "источник удалён", job.encrypt ? " · 🔒 AES-256" : "", job.enabled ? "" : " · выключено")),
-                  h("td", null, h("code", null, job.schedule), h("div", { class: "muted small" }, job.next_run ? "След.: " + fmtDate(job.next_run) : "")),
+                  h("td", { class: "title-cell" }, job.name, h("div", { class: "sub" }, job.source_name || t("источник удалён"), job.encrypt ? " · 🔒 AES-256" : "", job.enabled ? "" : t(" · выключено"))),
+                  h("td", null, h("code", null, job.schedule), h("div", { class: "muted small" }, job.next_run ? t("След.: ") + fmtDate(job.next_run) : "")),
                   h("td", null, h("span", { class: "badge " + cls }, st === "running" ? h("span", { class: "spinner", style: "width:10px;height:10px" }) : null, BACKUP_STATUS[st] || st), h("div", { class: "muted small" }, job.last_run_at ? ago(job.last_run_at) : ""), job.last_error ? h("div", { class: "small", style: "color:var(--critical);max-width:340px" }, job.last_error.slice(0, 200)) : null),
-                  h("td", { class: "muted" }, job.keep_last ? job.keep_last + " шт." : "все"),
+                  h("td", { class: "muted" }, job.keep_last ? job.keep_last + t(" шт.") : t("все")),
                   manage
                     ? h(
                         "td",
                         { class: "right nowrap" },
-                        h("button", { class: "btn sm", disabled: job.running, onclick: async () => { const r = await guard(() => api(`/api/backups/jobs/${job.id}/run`, { body: {} }), "Бэкап запущен"); if (r) setTimeout(load, 800); } }, icon("play"), "Запустить"),
+                        h("button", { class: "btn sm", disabled: job.running, onclick: async () => { const r = await guard(() => api(`/api/backups/jobs/${job.id}/run`, { body: {} }), t("Бэкап запущен")); if (r) setTimeout(load, 800); } }, icon("play"), t("Запустить")),
                         " ",
-                        h("button", { class: "btn sm ghost", title: "Изменить", onclick: () => jobForm(job) }, icon("edit")),
-                        h("button", { class: "btn sm ghost danger", title: "Удалить", onclick: () => confirmDialog(`Удалить задание «${job.name}»? Файлы бэкапов останутся на диске.`, async () => { await guard(() => api(`/api/backups/jobs/${job.id}`, { method: "DELETE" }), "Задание удалено"); load(); }) }, icon("trash"))
+                        h("button", { class: "btn sm ghost", title: t("Изменить"), onclick: () => jobForm(job) }, icon("edit")),
+                        h("button", { class: "btn sm ghost danger", title: t("Удалить"), onclick: () => confirmDialog(t("Удалить задание «{name}»? Файлы бэкапов останутся на диске.", { name: job.name }), async () => { await guard(() => api(`/api/backups/jobs/${job.id}`, { method: "DELETE" }), t("Задание удалено")); load(); }) }, icon("trash"))
                       )
                     : null
                 );
@@ -1397,7 +1468,7 @@ async function pageBackups(root) {
     }
     const names = Object.fromEntries(jobs.map((x) => [x.id, x.name]));
     if (!r.items.length) {
-      recordsBox.replaceChildren(emptyState("inbox", "Резервных копий ещё не было"));
+      recordsBox.replaceChildren(emptyState("inbox", t("Резервных копий ещё не было")));
     } else {
       recordsBox.replaceChildren(
         h(
@@ -1406,26 +1477,26 @@ async function pageBackups(root) {
           h(
             "table",
             { class: "table" },
-            h("thead", null, h("tr", null, h("th", null, "Дата"), h("th", null, "Задание"), h("th", null, "Размер"), h("th", null, "Проверка"), h("th", null, "Доставка"), h("th", null, "Статус"), h("th", { class: "right" }, ""))),
+            h("thead", null, h("tr", null, h("th", null, t("Дата")), h("th", null, t("Задание")), h("th", null, t("Размер")), h("th", null, t("Проверка")), h("th", null, t("Доставка")), h("th", null, t("Статус")), h("th", { class: "right" }, ""))),
             h(
               "tbody",
               null,
               r.items.map((rec) => {
                 const tg = (rec.delivery || {}).telegram;
                 const delivery = [];
-                if (tg) delivery.push(tg.mode === "no_bot" ? "Telegram: бот не настроен" : `Telegram: ${tg.sent}${tg.failed ? ", ошибок " + tg.failed : ""}${tg.mode === "parts" ? " (частями)" : tg.mode === "link" ? " (ссылка)" : ""}`);
-                if (rec.delivery && rec.delivery.folder) delivery.push(rec.delivery.folder.error ? "Папка: ошибка" : "Папка ✓");
-                if (rec.delivery && rec.delivery.s3) delivery.push(rec.delivery.s3.error ? "S3: ошибка" : "S3 ✓");
+                if (tg) delivery.push(tg.mode === "no_bot" ? t("Telegram: бот не настроен") : `Telegram: ${tg.sent}${tg.failed ? ", " + t("ошибок {n}", { n: tg.failed }) : ""}${tg.mode === "parts" ? " " + t("(частями)") : tg.mode === "link" ? " " + t("(ссылка)") : ""}`);
+                if (rec.delivery && rec.delivery.folder) delivery.push(rec.delivery.folder.error ? t("Папка: ошибка") : t("Папка ✓"));
+                if (rec.delivery && rec.delivery.s3) delivery.push(rec.delivery.s3.error ? t("S3: ошибка") : "S3 ✓");
                 const cls = { ok: "ok", failed: "critical", running: "accent" }[rec.status] || "";
                 return h(
                   "tr",
                   null,
-                  h("td", { class: "nowrap" }, fmtDate(rec.started_at), rec.manual ? h("div", { class: "faint small" }, "вручную") : null),
+                  h("td", { class: "nowrap" }, fmtDate(rec.started_at), rec.manual ? h("div", { class: "faint small" }, t("вручную")) : null),
                   h("td", null, names[rec.job_id] || "#" + rec.job_id, rec.file_name ? h("div", { class: "faint small mono" }, rec.file_name) : null),
                   h("td", { class: "nowrap" }, rec.size ? humanSize(rec.size) : "—"),
-                  h("td", null, rec.verified ? h("span", { class: "badge ok" }, "Целостность OK") : h("span", { class: "muted" }, "—")),
+                  h("td", null, rec.verified ? h("span", { class: "badge ok" }, t("Целостность OK")) : h("span", { class: "muted" }, "—")),
                   h("td", { class: "muted small" }, delivery.join(" · ") || "—"),
-                  h("td", null, h("span", { class: "badge " + cls }, BACKUP_STATUS[rec.status] || rec.status), rec.deleted ? h("div", { class: "faint small" }, "удалён ротацией") : null, rec.error ? h("div", { class: "small", style: "color:var(--critical);max-width:320px" }, rec.error.slice(0, 240)) : null),
+                  h("td", null, h("span", { class: "badge " + cls }, BACKUP_STATUS[rec.status] || rec.status), rec.deleted ? h("div", { class: "faint small" }, t("удалён ротацией")) : null, rec.error ? h("div", { class: "small", style: "color:var(--critical);max-width:320px" }, rec.error.slice(0, 240)) : null),
                   h("td", { class: "right" }, manage && rec.available ? h("a", { class: "btn sm ghost", href: `/api/backups/records/${rec.id}/download?access_token=${encodeURIComponent(S.token)}` }, icon("download")) : null)
                 );
               })
@@ -1444,7 +1515,7 @@ function jobForm(job) {
   const backupTypes = new Set((S.meta.connectors || []).filter((c) => c.supports_backup).map((c) => c.type));
   const sources = (S.meta.sources || []).filter((s) => backupTypes.has(s.type));
   if (!sources.length) {
-    toast("Сначала добавьте источник: MySQL, PostgreSQL, MS SQL или базу 1С", "error");
+    toast(t("Сначала добавьте источник: MySQL, PostgreSQL, MS SQL или базу 1С"), "error");
     return;
   }
   const d = job
@@ -1452,27 +1523,27 @@ function jobForm(job) {
     : { name: "", source_id: sources[0].id, schedule: "0 2 * * *", enabled: true, keep_last: 7, encrypt: true, options: {}, destinations: { telegram: true, split: true } };
   d.options = d.options || {};
   d.destinations = Object.assign({ telegram: true, split: true }, d.destinations || {});
-  const password = input({ type: "password", placeholder: job && job.has_password ? "•••••••• (не менять)" : "Пароль архива", autocomplete: "new-password" });
+  const password = input({ type: "password", placeholder: job && job.has_password ? t("•••••••• (не менять)") : t("Пароль архива"), autocomplete: "new-password" });
   const sched = input({ value: d.schedule, class: "mono", oninput: (e) => (d.schedule = e.target.value) });
   const optsBox = h("div");
-  const presets = [["0 2 * * *", "Ежедневно 02:00"], ["0 */6 * * *", "Каждые 6 ч"], ["0 22 * * 1-5", "Будни 22:00"], ["0 3 * * 0", "Вс 03:00"]];
+  const presets = [["0 2 * * *", t("Ежедневно 02:00")], ["0 */6 * * *", t("Каждые 6 ч")], ["0 22 * * 1-5", t("Будни 22:00")], ["0 3 * * 0", t("Вс 03:00")]];
 
   function drawOptions() {
     const source = sources.find((s) => String(s.id) === String(d.source_id));
     const type = source ? source.type : "";
     const opt = (key, label, help, placeholder) => field(label, input({ value: d.options[key] || "", placeholder: placeholder || "", oninput: (e) => (d.options[key] = e.target.value) }), help);
     const items = [];
-    if (type === "mysql") items.push(opt("tool_path", "Путь к mysqldump", "Пусто — из общих настроек", "C:\\Program Files\\MySQL\\bin\\mysqldump.exe"));
-    if (type === "postgresql") items.push(opt("tool_path", "Путь к pg_dump", "Пусто — из общих настроек", "C:\\Program Files\\PostgreSQL\\16\\bin\\pg_dump.exe"));
+    if (type === "mysql") items.push(opt("tool_path", t("Путь к mysqldump"), t("Пусто — из общих настроек"), "C:\\Program Files\\MySQL\\bin\\mysqldump.exe"));
+    if (type === "postgresql") items.push(opt("tool_path", t("Путь к pg_dump"), t("Пусто — из общих настроек"), "C:\\Program Files\\PostgreSQL\\16\\bin\\pg_dump.exe"));
     if (type === "mssql" || type === "onec_server") {
-      items.push(opt("server_dir", "Каталог для .bak на сервере SQL (для MS SQL)", "Путь, доступный службе SQL Server", "D:\\Backup"));
-      items.push(opt("local_dir", "Тот же каталог, доступный OpsWatch", "Например, сетевой путь. Пусто — совпадает с каталогом на сервере", "\\\\sql01\\Backup"));
+      items.push(opt("server_dir", t("Каталог для .bak на сервере SQL (для MS SQL)"), t("Путь, доступный службе SQL Server"), "D:\\Backup"));
+      items.push(opt("local_dir", t("Тот же каталог, доступный OpsWatch"), t("Например, сетевой путь. Пусто — совпадает с каталогом на сервере"), "\\\\sql01\\Backup"));
     }
-    if (type === "onec_server") items.push(opt("tool_path", "Путь к pg_dump (для PostgreSQL)", "Пусто — из общих настроек"));
+    if (type === "onec_server") items.push(opt("tool_path", t("Путь к pg_dump (для PostgreSQL)"), t("Пусто — из общих настроек")));
     if (type === "onec_file") {
-      items.push(checkbox("Использовать теневое копирование (VSS), если база занята", d.options.use_vss, (v) => (d.options.use_vss = v)));
-      items.push(checkbox("Добавить журнал регистрации в архив", d.options.include_log, (v) => (d.options.include_log = v)));
-      items.push(h("div", { class: "help small muted" }, "Без VSS бэкап выполняется только когда в базе нет пользователей. VSS требует запуска от имени администратора."));
+      items.push(checkbox(t("Использовать теневое копирование (VSS), если база занята"), d.options.use_vss, (v) => (d.options.use_vss = v)));
+      items.push(checkbox(t("Добавить журнал регистрации в архив"), d.options.include_log, (v) => (d.options.include_log = v)));
+      items.push(h("div", { class: "help small muted" }, t("Без VSS бэкап выполняется только когда в базе нет пользователей. VSS требует запуска от имени администратора.")));
     }
     optsBox.replaceChildren(...items);
   }
@@ -1480,49 +1551,49 @@ function jobForm(job) {
   const body = h(
     "div",
     null,
-    h("div", { class: "grid-2" }, field("Название", input({ value: d.name, placeholder: "Бухгалтерия — ночной бэкап", oninput: (e) => (d.name = e.target.value) })), field("Источник", select(sources.map((s) => [s.id, `${s.name} (${connectorOf(s.type).title})`]), d.source_id, { onchange: (e) => { d.source_id = Number(e.target.value); drawOptions(); } }))),
-    field("Расписание (cron: минута час день месяц день_недели)", sched),
+    h("div", { class: "grid-2" }, field(t("Название"), input({ value: d.name, placeholder: t("Бухгалтерия — ночной бэкап"), oninput: (e) => (d.name = e.target.value) })), field(t("Источник"), select(sources.map((s) => [s.id, `${s.name} (${connectorOf(s.type).title})`]), d.source_id, { onchange: (e) => { d.source_id = Number(e.target.value); drawOptions(); } }))),
+    field(t("Расписание (cron: минута час день месяц день_недели)"), sched),
     h("div", { class: "chips", style: "margin:-4px 0 12px" }, presets.map(([v, t]) => h("button", { class: "chip", type: "button", onclick: () => { sched.value = v; d.schedule = v; } }, t))),
-    h("div", { class: "grid-2" }, field("Сколько копий хранить локально", input({ type: "number", min: 0, value: d.keep_last, oninput: (e) => (d.keep_last = Number(e.target.value)) }), "0 — хранить все"), field("Пароль шифрования (AES-256)", password)),
-    h("div", { class: "row", style: "margin-bottom:12px" }, checkbox("Шифровать архив", d.encrypt, (v) => (d.encrypt = v)), checkbox("Задание включено", d.enabled, (v) => (d.enabled = v))),
-    h("fieldset", null, h("legend", null, "Параметры источника"), optsBox),
+    h("div", { class: "grid-2" }, field(t("Сколько копий хранить локально"), input({ type: "number", min: 0, value: d.keep_last, oninput: (e) => (d.keep_last = Number(e.target.value)) }), t("0 — хранить все")), field(t("Пароль шифрования (AES-256)"), password)),
+    h("div", { class: "row", style: "margin-bottom:12px" }, checkbox(t("Шифровать архив"), d.encrypt, (v) => (d.encrypt = v)), checkbox(t("Задание включено"), d.enabled, (v) => (d.enabled = v))),
+    h("fieldset", null, h("legend", null, t("Параметры источника")), optsBox),
     h(
       "fieldset",
       null,
-      h("legend", null, "Доставка"),
-      h("div", { class: "row" }, checkbox("Отправлять в Telegram", d.destinations.telegram, (v) => (d.destinations.telegram = v)), checkbox("Делить большие файлы на части", d.destinations.split, (v) => (d.destinations.split = v)), checkbox("Выгружать в S3", d.destinations.s3, (v) => (d.destinations.s3 = v))),
-      field("Кому отправлять (роли)", checkboxGroup(roleOptions(), d.destinations.telegram_roles, (v) => (d.destinations.telegram_roles = v)), "Если не выбрано — всем, у кого есть право управления бэкапами"),
-      field("Кому отправлять (пользователи)", checkboxGroup(userOptions(), d.destinations.telegram_users, (v) => (d.destinations.telegram_users = v.map(Number)))),
-      field("Копировать в папку (сетевую)", input({ value: d.destinations.folder || "", placeholder: "\\\\nas\\backup\\opswatch", oninput: (e) => (d.destinations.folder = e.target.value) }))
+      h("legend", null, t("Доставка")),
+      h("div", { class: "row" }, checkbox(t("Отправлять в Telegram"), d.destinations.telegram, (v) => (d.destinations.telegram = v)), checkbox(t("Делить большие файлы на части"), d.destinations.split, (v) => (d.destinations.split = v)), checkbox(t("Выгружать в S3"), d.destinations.s3, (v) => (d.destinations.s3 = v))),
+      field(t("Кому отправлять (роли)"), checkboxGroup(roleOptions(), d.destinations.telegram_roles, (v) => (d.destinations.telegram_roles = v)), t("Если не выбрано — всем, у кого есть право управления бэкапами")),
+      field(t("Кому отправлять (пользователи)"), checkboxGroup(userOptions(), d.destinations.telegram_users, (v) => (d.destinations.telegram_users = v.map(Number)))),
+      field(t("Копировать в папку (сетевую)"), input({ value: d.destinations.folder || "", placeholder: "\\\\nas\\backup\\opswatch", oninput: (e) => (d.destinations.folder = e.target.value) }))
     )
   );
   drawOptions();
   const m = modal({
-    title: job ? "Задание резервного копирования" : "Новое задание",
+    title: job ? t("Задание резервного копирования") : t("Новое задание"),
     body,
     wide: true,
     foot: [
-      h("button", { class: "btn", onclick: () => m.close() }, "Отмена"),
+      h("button", { class: "btn", onclick: () => m.close() }, t("Отмена")),
       h("button", {
         class: "btn primary",
         onclick: async () => {
           const payload = Object.assign({}, d, { password: password.value });
-          const r = await guard(() => api(job ? `/api/backups/jobs/${job.id}` : "/api/backups/jobs", { method: job ? "PUT" : "POST", body: payload }), "Сохранено");
+          const r = await guard(() => api(job ? `/api/backups/jobs/${job.id}` : "/api/backups/jobs", { method: job ? "PUT" : "POST", body: payload }), t("Сохранено"));
           if (r) {
             m.close();
             renderPage();
           }
         },
-      }, "Сохранить"),
+      }, t("Сохранить")),
     ],
   });
 }
 
 async function pageSources(root) {
-  append(root, pageHead("Источники", "Базы данных, 1С, системы мониторинга и webhook-и", h("button", { class: "btn primary", onclick: () => sourceForm(null) }, icon("plus"), "Добавить источник")));
+  append(root, pageHead(t("Источники"), t("Базы данных, 1С, системы мониторинга и webhook-и"), h("button", { class: "btn primary", onclick: () => sourceForm(null) }, icon("plus"), t("Добавить источник"))));
   const data = await api("/api/sources");
   if (!data.items.length) {
-    root.append(panel(null, null, emptyState("server", "Источников пока нет. Подключите базу данных, 1С или систему мониторинга.")));
+    root.append(panel(null, null, emptyState("server", t("Источников пока нет. Подключите базу данных, 1С или систему мониторинга."))));
     return;
   }
   root.append(
@@ -1535,7 +1606,7 @@ async function pageSources(root) {
         h(
           "table",
           { class: "table" },
-          h("thead", null, h("tr", null, h("th", null, "Источник"), h("th", null, "Категория"), h("th", null, "Статус"), h("th", null, "Опрос"), h("th", null, "Доступ"), h("th", { class: "right" }, ""))),
+          h("thead", null, h("tr", null, h("th", null, t("Источник")), h("th", null, t("Категория")), h("th", null, t("Статус")), h("th", null, t("Опрос")), h("th", null, t("Доступ")), h("th", { class: "right" }, ""))),
           h(
             "tbody",
             null,
@@ -1546,15 +1617,15 @@ async function pageSources(root) {
                 h("td", { class: "title-cell" }, s.name, h("div", { class: "sub" }, s.type_title)),
                 h("td", { class: "muted" }, CAT[s.category] || s.category),
                 h("td", null, h("div", { class: "row" }, h("span", { class: "dot " + s.status }), SOURCE_STATUS[s.status] || s.status), s.last_error ? h("div", { class: "small", style: "color:var(--critical);max-width:300px" }, s.last_error.slice(0, 160)) : null),
-                h("td", { class: "muted small nowrap" }, s.passive ? "webhook" : `каждые ${s.poll_interval} с`, s.last_check_at ? h("div", null, ago(s.last_check_at)) : null),
-                h("td", { class: "muted small" }, s.visible_roles.length ? s.visible_roles.map((r) => (S.meta.roles.find((x) => x.name === r) || { title: r }).title).join(", ") : "Все по правам"),
+                h("td", { class: "muted small nowrap" }, s.passive ? "webhook" : t("каждые {n} с", { n: s.poll_interval }), s.last_check_at ? h("div", null, ago(s.last_check_at)) : null),
+                h("td", { class: "muted small" }, s.visible_roles.length ? s.visible_roles.map((r) => (S.meta.roles.find((x) => x.name === r) || { title: r }).title).join(", ") : t("Все по правам")),
                 h(
                   "td",
                   { class: "right nowrap" },
-                  !s.passive ? h("button", { class: "btn sm ghost", title: "Графики", onclick: () => openMetrics(s) }, icon("chart")) : null,
-                  !s.passive ? h("button", { class: "btn sm ghost", title: "Проверить сейчас", onclick: async () => { const r = await guard(() => api(`/api/sources/${s.id}/poll`, { body: {} })); if (r) toast(r.ok ? "OK: " + r.message : "Ошибка: " + r.message, r.ok ? "" : "error"); renderPage(); } }, icon("refresh")) : null,
-                  h("button", { class: "btn sm ghost", title: "Изменить", onclick: () => sourceForm(s) }, icon("edit")),
-                  h("button", { class: "btn sm ghost danger", title: "Удалить", onclick: () => confirmDialog(`Удалить источник «${s.name}»? История событий сохранится.`, async () => { await guard(() => api(`/api/sources/${s.id}`, { method: "DELETE" }), "Источник удалён"); S.meta = await api("/api/meta"); renderPage(); }) }, icon("trash"))
+                  !s.passive ? h("button", { class: "btn sm ghost", title: t("Графики"), onclick: () => openMetrics(s) }, icon("chart")) : null,
+                  !s.passive ? h("button", { class: "btn sm ghost", title: t("Проверить сейчас"), onclick: async () => { const r = await guard(() => api(`/api/sources/${s.id}/poll`, { body: {} })); if (r) toast(r.ok ? "OK: " + r.message : t("Ошибка: ") + r.message, r.ok ? "" : "error"); renderPage(); } }, icon("refresh")) : null,
+                  h("button", { class: "btn sm ghost", title: t("Изменить"), onclick: () => sourceForm(s) }, icon("edit")),
+                  h("button", { class: "btn sm ghost danger", title: t("Удалить"), onclick: () => confirmDialog(t("Удалить источник «{name}»? История событий сохранится.", { name: s.name }), async () => { await guard(() => api(`/api/sources/${s.id}`, { method: "DELETE" }), t("Источник удалён")); S.meta = await api("/api/meta"); renderPage(); }) }, icon("trash"))
                 )
               )
             )
@@ -1571,8 +1642,8 @@ function sourceForm(existing, presetCategory) {
   if (existing) return sourceEditor(existing.type, existing);
   const connectors = (S.meta.connectors || []).filter((c) => !presetCategory || c.category === presetCategory || (presetCategory === "monitoring" && c.passive));
   const m = modal({
-    title: "Новый источник",
-    subtitle: "Выберите тип подключения",
+    title: t("Новый источник"),
+    subtitle: t("Выберите тип подключения"),
     wide: true,
     body: h(
       "div",
@@ -1624,12 +1695,12 @@ function checksEditor(cfg, ctx) {
         const preview = h("div");
         function drawExtra() {
           const items = [];
-          if (c.mode === "new_rows") items.push(field("Ключевая колонка", input({ value: c.key_column || "", placeholder: "id", oninput: (e) => (c.key_column = e.target.value) })));
+          if (c.mode === "new_rows") items.push(field(t("Ключевая колонка"), input({ value: c.key_column || "", placeholder: "id", oninput: (e) => (c.key_column = e.target.value) })));
           if (c.mode === "threshold") {
-            items.push(field("Условие тревоги", select([[">", "больше"], [">=", "больше или равно"], ["<", "меньше"], ["<=", "меньше или равно"], ["==", "равно"], ["!=", "не равно"]], c.operator || ">", { onchange: (e) => (c.operator = e.target.value) })));
-            items.push(field("Порог", input({ type: "number", value: c.threshold ?? 0, oninput: (e) => (c.threshold = Number(e.target.value)) })));
+            items.push(field(t("Условие тревоги"), select([[">", t("больше")], [">=", t("больше или равно")], ["<", t("меньше")], ["<=", t("меньше или равно")], ["==", t("равно")], ["!=", t("не равно")]], c.operator || ">", { onchange: (e) => (c.operator = e.target.value) })));
+            items.push(field(t("Порог"), input({ type: "number", value: c.threshold ?? 0, oninput: (e) => (c.threshold = Number(e.target.value)) })));
           }
-          items.push(field("Шаблон заголовка", input({ value: c.title || "", placeholder: c.mode === "new_rows" ? "Новый заказ №{id}" : "", oninput: (e) => (c.title = e.target.value) })));
+          items.push(field(t("Шаблон заголовка"), input({ value: c.title || "", placeholder: c.mode === "new_rows" ? t("Новый заказ №{id}") : "", oninput: (e) => (c.title = e.target.value) })));
           extra.replaceChildren(...items);
         }
         if (!c.mode) c.mode = "threshold";
@@ -1641,16 +1712,16 @@ function checksEditor(cfg, ctx) {
           h(
             "div",
             { class: "grid-3" },
-            field("Название", input({ value: c.name || "", placeholder: "Очередь заданий", oninput: (e) => (c.name = e.target.value) })),
-            field("Режим", select([["new_rows", "Новые записи"], ["threshold", "Порог значения"], ["rows_exist", "Есть строки — тревога"]], c.mode, { onchange: (e) => { c.mode = e.target.value; drawExtra(); } })),
-            field("Важность", select([["info", "Информация"], ["warning", "Предупреждение"], ["critical", "Критично"]], c.severity, { onchange: (e) => (c.severity = e.target.value) }))
+            field(t("Название"), input({ value: c.name || "", placeholder: t("Очередь заданий"), oninput: (e) => (c.name = e.target.value) })),
+            field(t("Режим"), select([["new_rows", t("Новые записи")], ["threshold", t("Порог значения")], ["rows_exist", t("Есть строки — тревога")]], c.mode, { onchange: (e) => { c.mode = e.target.value; drawExtra(); } })),
+            field(t("Важность"), select([["info", t("Информация")], ["warning", t("Предупреждение")], ["critical", t("Критично")]], c.severity, { onchange: (e) => (c.severity = e.target.value) }))
           ),
-          field("SQL-запрос (только SELECT)", h("textarea", { class: "code", value: c.query || "", placeholder: c.mode === "new_rows" ? "SELECT id, number, total FROM orders ORDER BY id DESC LIMIT 50" : "SELECT COUNT(*) FROM jobs WHERE status = 'failed'", oninput: (e) => (c.query = e.target.value) })),
+          field(t("SQL-запрос (только SELECT)"), h("textarea", { class: "code", value: c.query || "", placeholder: c.mode === "new_rows" ? "SELECT id, number, total FROM orders ORDER BY id DESC LIMIT 50" : "SELECT COUNT(*) FROM jobs WHERE status = 'failed'", oninput: (e) => (c.query = e.target.value) })),
           extra,
           h(
             "div",
             { class: "between" },
-            checkbox("Включена", c.enabled !== false, (v) => (c.enabled = v)),
+            checkbox(t("Включена"), c.enabled !== false, (v) => (c.enabled = v)),
             h(
               "div",
               { class: "row" },
@@ -1671,14 +1742,14 @@ function checksEditor(cfg, ctx) {
                       : null
                   );
                 },
-              }, "Проверить запрос"),
+              }, t("Проверить запрос")),
               h("button", { class: "btn sm danger", type: "button", onclick: () => { cfg.checks.splice(i, 1); draw(); } }, icon("trash"))
             )
           ),
           preview
         );
       }),
-      h("button", { class: "btn", type: "button", onclick: () => { cfg.checks.push({ name: "", mode: "threshold", severity: "warning", enabled: true, operator: ">", threshold: 0 }); draw(); } }, icon("plus"), "Добавить проверку")
+      h("button", { class: "btn", type: "button", onclick: () => { cfg.checks.push({ name: "", mode: "threshold", severity: "warning", enabled: true, operator: ">", threshold: 0 }); draw(); } }, icon("plus"), t("Добавить проверку"))
     );
   }
   draw();
@@ -1687,12 +1758,12 @@ function checksEditor(cfg, ctx) {
 
 function ingestHelp(type, url) {
   if (type === "zabbix_webhook") {
-    return h("div", { class: "stack small" }, h("div", null, "В Zabbix: Оповещения → Способы оповещений → Создать → тип «Webhook». Вставьте скрипт из файла ", h("code", null, "examples/zabbix_webhook.js"), ", параметр URL — адрес выше."), h("div", { class: "muted" }, "Параметры: event_id={EVENT.ID}, event_value={EVENT.VALUE}, severity={EVENT.SEVERITY}, host={HOST.NAME}, trigger_name={EVENT.NAME}, message={ALERT.MESSAGE}."));
+    return h("div", { class: "stack small" }, h("div", null, t("В Zabbix: Оповещения → Способы оповещений → Создать → тип «Webhook». Вставьте скрипт из файла "), h("code", null, "examples/zabbix_webhook.js"), t(", параметр URL — адрес выше.")), h("div", { class: "muted" }, t("Параметры: event_id={EVENT.ID}, event_value={EVENT.VALUE}, severity={EVENT.SEVERITY}, host={HOST.NAME}, trigger_name={EVENT.NAME}, message={ALERT.MESSAGE}.")));
   }
   if (type === "alertmanager") {
-    return h("div", { class: "stack small" }, h("div", null, "В alertmanager.yml добавьте получателя:"), h("pre", null, `receivers:\n  - name: opswatch\n    webhook_configs:\n      - url: "${url}"\n        send_resolved: true`));
+    return h("div", { class: "stack small" }, h("div", null, t("В alertmanager.yml добавьте получателя:")), h("pre", null, `receivers:\n  - name: opswatch\n    webhook_configs:\n      - url: "${url}"\n        send_resolved: true`));
   }
-  return h("div", { class: "stack small" }, h("div", null, "Отправьте POST с JSON:"), h("pre", null, `curl -X POST "${url}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"title":"Диск заполнен","message":"C: 95%","severity":"critical","category":"monitoring"}'`), h("div", { class: "muted" }, 'Для закрытия события отправьте тот же "external_id" со "status": "resolved". Для баг-репортов укажите "category": "bug".'));
+  return h("div", { class: "stack small" }, h("div", null, t("Отправьте POST с JSON:")), h("pre", null, `curl -X POST "${url}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"title":"Disk C: is full","message":"C: 95%","severity":"critical","category":"monitoring"}'`), h("div", { class: "muted" }, 'Для закрытия события отправьте тот же "external_id" со "status": "resolved". Для баг-репортов укажите "category": "bug".'));
 }
 
 function sourceEditor(type, existing) {
@@ -1704,7 +1775,7 @@ function sourceEditor(type, existing) {
   const ctx = () => ({ id: existing ? existing.id : null, name: d.name, type, category: d.category, config: d.config });
   const groups = new Map();
   for (const spec of conn.fields) {
-    const g = spec.group || "Параметры";
+    const g = spec.group || t("Параметры");
     if (!groups.has(g)) groups.set(g, []);
     groups.get(g).push(spec);
   }
@@ -1719,20 +1790,20 @@ function sourceEditor(type, existing) {
     h(
       "div",
       { class: "grid-2" },
-      field("Название *", input({ value: d.name, placeholder: conn.title, oninput: (e) => (d.name = e.target.value) })),
-      field("Категория", select((S.meta.categories || []).map((c) => [c.id, c.title]), d.category, { onchange: (e) => (d.category = e.target.value) }))
+      field(t("Название *"), input({ value: d.name, placeholder: conn.title, oninput: (e) => (d.name = e.target.value) })),
+      field(t("Категория"), select((S.meta.categories || []).map((c) => [c.id, c.title]), d.category, { onchange: (e) => (d.category = e.target.value) }))
     ),
     h(
       "div",
       { class: "grid-2" },
-      conn.passive ? h("div") : field("Интервал опроса, сек", input({ type: "number", min: 15, value: d.poll_interval, oninput: (e) => (d.poll_interval = Number(e.target.value)) })),
-      field("Состояние", checkbox("Источник включён", d.enabled, (v) => (d.enabled = v)))
+      conn.passive ? h("div") : field(t("Интервал опроса, сек"), input({ type: "number", min: 15, value: d.poll_interval, oninput: (e) => (d.poll_interval = Number(e.target.value)) })),
+      field(t("Состояние"), checkbox(t("Источник включён"), d.enabled, (v) => (d.enabled = v)))
     ),
-    field("Кто видит события источника", checkboxGroup(roleOptions(), d.visible_roles, (v) => (d.visible_roles = v)), "Если ничего не выбрано — все, у кого есть право на категорию"),
+    field(t("Кто видит события источника"), checkboxGroup(roleOptions(), d.visible_roles, (v) => (d.visible_roles = v)), t("Если ничего не выбрано — все, у кого есть право на категорию")),
     existing && existing.ingest_path
-      ? h("fieldset", null, h("legend", null, "Адрес для отправки событий"), copyField(existing.ingest_url || location.origin + existing.ingest_path), h("div", { style: "margin-top:10px" }, ingestHelp(type, existing.ingest_url || location.origin + existing.ingest_path)))
+      ? h("fieldset", null, h("legend", null, t("Адрес для отправки событий")), copyField(existing.ingest_url || location.origin + existing.ingest_path), h("div", { style: "margin-top:10px" }, ingestHelp(type, existing.ingest_url || location.origin + existing.ingest_path)))
       : conn.passive
-      ? h("div", { class: "notice" }, icon("info"), h("div", null, "После сохранения здесь появится адрес webhook с секретным токеном."))
+      ? h("div", { class: "notice" }, icon("info"), h("div", null, t("После сохранения здесь появится адрес webhook с секретным токеном.")))
       : null,
     fieldsets,
     result
@@ -1750,36 +1821,36 @@ function sourceEditor(type, existing) {
           if (!r) return result.replaceChildren();
           result.replaceChildren(h("div", { class: "notice " + (r.ok ? "" : "critical") }, icon(r.ok ? "check" : "alert"), h("div", null, r.message)));
         },
-      }, "Проверить подключение")
+      }, t("Проверить подключение"))
     );
   }
-  foot.push(h("button", { class: "btn", onclick: () => m.close() }, "Отмена"));
+  foot.push(h("button", { class: "btn", onclick: () => m.close() }, t("Отмена")));
   foot.push(
     h("button", {
       class: "btn primary",
       onclick: async () => {
-        if (!d.name.trim()) return toast("Укажите название", "error");
+        if (!d.name.trim()) return toast(t("Укажите название"), "error");
         const payload = Object.assign({ type }, d);
-        const r = await guard(() => api(existing ? `/api/sources/${existing.id}` : "/api/sources", { method: existing ? "PUT" : "POST", body: payload }), "Источник сохранён");
+        const r = await guard(() => api(existing ? `/api/sources/${existing.id}` : "/api/sources", { method: existing ? "PUT" : "POST", body: payload }), t("Источник сохранён"));
         if (!r) return;
         m.close();
         S.meta = await api("/api/meta");
         if (!existing && r.ingest_path) sourceEditor(type, r);
         renderPage();
       },
-    }, "Сохранить")
+    }, t("Сохранить"))
   );
-  const m = modal({ title: existing ? existing.name : conn.title, subtitle: existing ? conn.title : "Новый источник", body, foot, wide: true });
+  const m = modal({ title: existing ? existing.name : conn.title, subtitle: existing ? conn.title : t("Новый источник"), body, foot, wide: true });
 }
 
 async function pageRules(root) {
-  append(root, pageHead("Правила маршрутизации", "Кому и какие события отправлять. Правила применяются по порядку", h("button", { class: "btn primary", onclick: () => ruleForm(null) }, icon("plus"), "Новое правило")));
+  append(root, pageHead(t("Правила маршрутизации"), t("Кому и какие события отправлять. Правила применяются по порядку"), h("button", { class: "btn primary", onclick: () => ruleForm(null) }, icon("plus"), t("Новое правило"))));
   const data = await api("/api/rules");
   const roleTitle = (n) => (S.meta.roles.find((r) => r.name === n) || { title: n }).title;
   const userTitle = (id) => { const u = (S.meta.users || []).find((x) => x.id === id); return u ? u.full_name || u.username : "#" + id; };
   const sourceTitle = (id) => { const s = (S.meta.sources || []).find((x) => x.id === id); return s ? s.name : "#" + id; };
   if (!data.items.length) {
-    root.append(panel(null, null, emptyState("sliders", "Правил нет — события никому не отправляются")));
+    root.append(panel(null, null, emptyState("sliders", t("Правил нет — события никому не отправляются"))));
     return;
   }
   root.append(
@@ -1792,29 +1863,29 @@ async function pageRules(root) {
         h(
           "table",
           { class: "table" },
-          h("thead", null, h("tr", null, h("th", null, "№"), h("th", null, "Правило"), h("th", null, "Получатели"), h("th", null, "Эскалация"), h("th", null, "Вкл."), h("th", { class: "right" }, ""))),
+          h("thead", null, h("tr", null, h("th", null, "№"), h("th", null, t("Правило")), h("th", null, t("Получатели")), h("th", null, t("Эскалация")), h("th", null, t("Вкл.")), h("th", { class: "right" }, ""))),
           h(
             "tbody",
             null,
             data.items.map((r) => {
-              const cond = [r.categories.length ? r.categories.map((c) => CAT[c]).join(", ") : "Все категории", "от «" + SEV[r.min_severity] + "»"];
-              if (r.source_ids.length) cond.push("источники: " + r.source_ids.map(sourceTitle).join(", "));
-              if (r.event_types.length) cond.push("типы: " + r.event_types.join(", "));
+              const cond = [r.categories.length ? r.categories.map((c) => CAT[c]).join(", ") : t("Все категории"), t("от «") + SEV[r.min_severity] + "»"];
+              if (r.source_ids.length) cond.push(t("источники: ") + r.source_ids.map(sourceTitle).join(", "));
+              if (r.event_types.length) cond.push(t("типы: ") + r.event_types.join(", "));
               const targets = [...r.target_roles.map(roleTitle), ...r.target_users.map(userTitle)];
-              const esc = r.escalate_after_min && (r.escalate_roles.length || r.escalate_users.length) ? `через ${r.escalate_after_min} мин → ${[...r.escalate_roles.map(roleTitle), ...r.escalate_users.map(userTitle)].join(", ")}` : "—";
+              const esc = r.escalate_after_min && (r.escalate_roles.length || r.escalate_users.length) ? t("через {n} мин → {targets}", { n: r.escalate_after_min, targets: [...r.escalate_roles.map(roleTitle), ...r.escalate_users.map(userTitle)].join(", ") }) : "—";
               return h(
                 "tr",
                 null,
                 h("td", { class: "muted" }, r.priority),
-                h("td", { class: "title-cell" }, r.name, h("div", { class: "sub" }, cond.join(" · ")), r.stop ? h("span", { class: "badge outline small" }, "Остановить дальнейшие правила") : null),
+                h("td", { class: "title-cell" }, r.name, h("div", { class: "sub" }, cond.join(" · ")), r.stop ? h("span", { class: "badge outline small" }, t("Остановить дальнейшие правила")) : null),
                 h("td", { class: "small" }, targets.join(", ") || "—"),
                 h("td", { class: "small muted" }, esc),
-                h("td", null, h("input", { type: "checkbox", checked: r.enabled, onchange: async (e) => { await guard(() => api(`/api/rules/${r.id}`, { method: "PUT", body: Object.assign({}, r, { enabled: e.target.checked }) }), e.target.checked ? "Правило включено" : "Правило выключено"); } })),
+                h("td", null, h("input", { type: "checkbox", checked: r.enabled, onchange: async (e) => { await guard(() => api(`/api/rules/${r.id}`, { method: "PUT", body: Object.assign({}, r, { enabled: e.target.checked }) }), e.target.checked ? t("Правило включено") : t("Правило выключено")); } })),
                 h(
                   "td",
                   { class: "right nowrap" },
                   h("button", { class: "btn sm ghost", onclick: () => ruleForm(r) }, icon("edit")),
-                  h("button", { class: "btn sm ghost danger", onclick: () => confirmDialog(`Удалить правило «${r.name}»?`, async () => { await guard(() => api(`/api/rules/${r.id}`, { method: "DELETE" }), "Правило удалено"); renderPage(); }) }, icon("trash"))
+                  h("button", { class: "btn sm ghost danger", onclick: () => confirmDialog(t("Удалить правило «{name}»?", { name: r.name }), async () => { await guard(() => api(`/api/rules/${r.id}`, { method: "DELETE" }), t("Правило удалено")); renderPage(); }) }, icon("trash"))
                 )
               );
             })
@@ -1833,62 +1904,62 @@ function ruleForm(rule) {
   const body = h(
     "div",
     null,
-    h("div", { class: "grid-2" }, field("Название", input({ value: d.name, oninput: (e) => (d.name = e.target.value) })), field("Порядок", input({ type: "number", value: d.priority, oninput: (e) => (d.priority = Number(e.target.value)) }), "Меньше — раньше")),
+    h("div", { class: "grid-2" }, field(t("Название"), input({ value: d.name, oninput: (e) => (d.name = e.target.value) })), field(t("Порядок"), input({ type: "number", value: d.priority, oninput: (e) => (d.priority = Number(e.target.value)) }), t("Меньше — раньше"))),
     h(
       "fieldset",
       null,
-      h("legend", null, "Условия"),
-      field("Категории", checkboxGroup((S.meta.categories || []).map((c) => [c.id, c.title]), d.categories, (v) => (d.categories = v)), "Пусто — любые"),
-      field("Минимальная важность", select([["info", "Информация"], ["warning", "Предупреждение"], ["critical", "Критично"]], d.min_severity, { onchange: (e) => (d.min_severity = e.target.value) })),
-      (S.meta.sources || []).length ? field("Источники", checkboxGroup(S.meta.sources.map((s) => [s.id, s.name]), d.source_ids, (v) => (d.source_ids = v.map(Number))), "Пусто — любые") : null,
-      field("Типы событий", input({ value: d.event_types.join(", "), placeholder: "source.down, backup.*, check.*", oninput: (e) => (d.event_types = e.target.value.split(",").map((x) => x.trim()).filter(Boolean)) }), "Через запятую, можно использовать * . Пусто — любые")
+      h("legend", null, t("Условия")),
+      field(t("Категории"), checkboxGroup((S.meta.categories || []).map((c) => [c.id, c.title]), d.categories, (v) => (d.categories = v)), t("Пусто — любые")),
+      field(t("Минимальная важность"), select([["info", t("Информация")], ["warning", t("Предупреждение")], ["critical", t("Критично")]], d.min_severity, { onchange: (e) => (d.min_severity = e.target.value) })),
+      (S.meta.sources || []).length ? field(t("Источники"), checkboxGroup(S.meta.sources.map((s) => [s.id, s.name]), d.source_ids, (v) => (d.source_ids = v.map(Number))), t("Пусто — любые")) : null,
+      field(t("Типы событий"), input({ value: d.event_types.join(", "), placeholder: "source.down, backup.*, check.*", oninput: (e) => (d.event_types = e.target.value.split(",").map((x) => x.trim()).filter(Boolean)) }), t("Через запятую, можно использовать * . Пусто — любые"))
     ),
     h(
       "fieldset",
       null,
-      h("legend", null, "Получатели"),
-      field("Роли", checkboxGroup(roleOptions(), d.target_roles, (v) => (d.target_roles = v))),
-      field("Пользователи", checkboxGroup(userOptions(), d.target_users, (v) => (d.target_users = v.map(Number))))
+      h("legend", null, t("Получатели")),
+      field(t("Роли"), checkboxGroup(roleOptions(), d.target_roles, (v) => (d.target_roles = v))),
+      field(t("Пользователи"), checkboxGroup(userOptions(), d.target_users, (v) => (d.target_users = v.map(Number))))
     ),
     h(
       "fieldset",
       null,
-      h("legend", null, "Эскалация критичных событий"),
-      field("Если не подтверждено за, минут", input({ type: "number", min: 0, value: d.escalate_after_min, oninput: (e) => (d.escalate_after_min = Number(e.target.value)) }), "0 — без эскалации"),
-      field("Отправить ролям", checkboxGroup(roleOptions(), d.escalate_roles, (v) => (d.escalate_roles = v))),
-      field("Отправить пользователям", checkboxGroup(userOptions(), d.escalate_users, (v) => (d.escalate_users = v.map(Number))))
+      h("legend", null, t("Эскалация критичных событий")),
+      field(t("Если не подтверждено за, минут"), input({ type: "number", min: 0, value: d.escalate_after_min, oninput: (e) => (d.escalate_after_min = Number(e.target.value)) }), t("0 — без эскалации")),
+      field(t("Отправить ролям"), checkboxGroup(roleOptions(), d.escalate_roles, (v) => (d.escalate_roles = v))),
+      field(t("Отправить пользователям"), checkboxGroup(userOptions(), d.escalate_users, (v) => (d.escalate_users = v.map(Number))))
     ),
-    h("div", { class: "row" }, checkbox("Правило включено", d.enabled, (v) => (d.enabled = v)), checkbox("Не проверять следующие правила, если это сработало", d.stop, (v) => (d.stop = v)))
+    h("div", { class: "row" }, checkbox(t("Правило включено"), d.enabled, (v) => (d.enabled = v)), checkbox(t("Не проверять следующие правила, если это сработало"), d.stop, (v) => (d.stop = v)))
   );
   const m = modal({
-    title: rule ? "Правило" : "Новое правило",
+    title: rule ? t("Правило") : t("Новое правило"),
     body,
     wide: true,
     foot: [
-      h("button", { class: "btn", onclick: () => m.close() }, "Отмена"),
+      h("button", { class: "btn", onclick: () => m.close() }, t("Отмена")),
       h("button", {
         class: "btn primary",
         onclick: async () => {
-          const r = await guard(() => api(rule ? `/api/rules/${rule.id}` : "/api/rules", { method: rule ? "PUT" : "POST", body: d }), "Правило сохранено");
+          const r = await guard(() => api(rule ? `/api/rules/${rule.id}` : "/api/rules", { method: rule ? "PUT" : "POST", body: d }), t("Правило сохранено"));
           if (r) {
             m.close();
             renderPage();
           }
         },
-      }, "Сохранить"),
+      }, t("Сохранить")),
     ],
   });
 }
 
 async function pageUsers(root) {
-  append(root, pageHead("Пользователи и роли", "Подтверждение заявок, права доступа и роли"));
+  append(root, pageHead(t("Пользователи и роли"), t("Подтверждение заявок, права доступа и роли")));
   const [users, roles] = await Promise.all([api("/api/users"), api("/api/roles")]);
   const roleOpts = roles.items.map((r) => [r.id, r.title]);
   const pending = users.items.filter((u) => u.status === "pending");
   if (pending.length) {
     root.append(
       panel(
-        `Заявки на регистрацию (${pending.length})`,
+        t("Заявки на регистрацию ({n})", { n: pending.length }),
         null,
         h(
           "div",
@@ -1903,8 +1974,8 @@ async function pageUsers(root) {
                 "div",
                 { class: "row" },
                 roleSel,
-                h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api(`/api/users/${u.id}/approve`, { body: { role_id: Number(roleSel.value) } }), "Пользователь подтверждён"); if (r) { S.meta = await api("/api/meta"); renderPage(); } } }, icon("check"), "Подтвердить"),
-                h("button", { class: "btn danger", onclick: () => confirmDialog(`Отклонить заявку ${u.username}?`, async () => { await guard(() => api(`/api/users/${u.id}/reject`, { body: {} }), "Заявка отклонена"); renderPage(); }, "Отклонить") }, "Отклонить")
+                h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api(`/api/users/${u.id}/approve`, { body: { role_id: Number(roleSel.value) } }), t("Пользователь подтверждён")); if (r) { S.meta = await api("/api/meta"); renderPage(); } } }, icon("check"), t("Подтвердить")),
+                h("button", { class: "btn danger", onclick: () => confirmDialog(t("Отклонить заявку {name}?", { name: u.username }), async () => { await guard(() => api(`/api/users/${u.id}/reject`, { body: {} }), t("Заявка отклонена")); renderPage(); }, t("Отклонить")) }, t("Отклонить"))
               )
             );
           })
@@ -1915,7 +1986,7 @@ async function pageUsers(root) {
   const others = users.items.filter((u) => u.status !== "pending");
   root.append(
     panel(
-      "Пользователи",
+      t("Пользователи"),
       null,
       h(
         "div",
@@ -1923,7 +1994,7 @@ async function pageUsers(root) {
         h(
           "table",
           { class: "table" },
-          h("thead", null, h("tr", null, h("th", null, "Пользователь"), h("th", null, "Роль"), h("th", null, "Статус"), h("th", null, "Telegram"), h("th", null, "Вход"), h("th", { class: "right" }, ""))),
+          h("thead", null, h("tr", null, h("th", null, t("Пользователь")), h("th", null, t("Роль")), h("th", null, t("Статус")), h("th", null, "Telegram"), h("th", null, t("Вход")), h("th", { class: "right" }, ""))),
           h(
             "tbody",
             null,
@@ -1931,16 +2002,16 @@ async function pageUsers(root) {
               h(
                 "tr",
                 null,
-                h("td", { class: "title-cell" }, u.full_name || u.username, h("div", { class: "sub" }, u.username, u.is_superuser ? " · главный администратор" : "")),
-                h("td", null, select([["", "— нет —"], ...roleOpts], u.role ? u.role.id : "", { disabled: u.is_superuser, onchange: async (e) => { await guard(() => api(`/api/users/${u.id}`, { method: "PUT", body: { role_id: e.target.value ? Number(e.target.value) : null } }), "Роль изменена"); } })),
-                h("td", null, select([["active", "Активен"], ["blocked", "Заблокирован"]], u.status, { disabled: u.is_superuser, onchange: async (e) => { await guard(() => api(`/api/users/${u.id}`, { method: "PUT", body: { status: e.target.value } }), "Статус изменён"); } })),
-                h("td", { class: "small" }, u.telegram_linked || u.personal_bot_linked ? h("span", { class: "badge ok" }, "✓ " + (u.telegram_username ? "@" + u.telegram_username : "привязан")) : h("span", { class: "muted" }, u.telegram_username ? "@" + u.telegram_username + " (не привязан)" : "—")),
+                h("td", { class: "title-cell" }, u.full_name || u.username, h("div", { class: "sub" }, u.username, u.is_superuser ? t(" · главный администратор") : "")),
+                h("td", null, select([["", t("— нет —")], ...roleOpts], u.role ? u.role.id : "", { disabled: u.is_superuser, onchange: async (e) => { await guard(() => api(`/api/users/${u.id}`, { method: "PUT", body: { role_id: e.target.value ? Number(e.target.value) : null } }), t("Роль изменена")); } })),
+                h("td", null, select([["active", t("Активен")], ["blocked", t("Заблокирован")]], u.status, { disabled: u.is_superuser, onchange: async (e) => { await guard(() => api(`/api/users/${u.id}`, { method: "PUT", body: { status: e.target.value } }), t("Статус изменён")); } })),
+                h("td", { class: "small" }, u.telegram_linked || u.personal_bot_linked ? h("span", { class: "badge ok" }, "✓ " + (u.telegram_username ? "@" + u.telegram_username : t("привязан"))) : h("span", { class: "muted" }, u.telegram_username ? "@" + u.telegram_username + t(" (не привязан)") : "—")),
                 h("td", { class: "muted small nowrap" }, u.last_login_at ? ago(u.last_login_at) : "—"),
                 h(
                   "td",
                   { class: "right nowrap" },
-                  h("button", { class: "btn sm ghost", title: "Сбросить пароль", onclick: () => resetPassword(u) }, "Пароль"),
-                  u.is_superuser || u.id === S.me.id ? null : h("button", { class: "btn sm ghost danger", onclick: () => confirmDialog(`Удалить пользователя ${u.username}?`, async () => { await guard(() => api(`/api/users/${u.id}`, { method: "DELETE" }), "Пользователь удалён"); renderPage(); }) }, icon("trash"))
+                  h("button", { class: "btn sm ghost", title: t("Сбросить пароль"), onclick: () => resetPassword(u) }, t("Пароль")),
+                  u.is_superuser || u.id === S.me.id ? null : h("button", { class: "btn sm ghost danger", onclick: () => confirmDialog(t("Удалить пользователя {name}?", { name: u.username }), async () => { await guard(() => api(`/api/users/${u.id}`, { method: "DELETE" }), t("Пользователь удалён")); renderPage(); }) }, icon("trash"))
                 )
               )
             )
@@ -1953,15 +2024,15 @@ async function pageUsers(root) {
   const permTitle = Object.fromEntries((S.meta.permissions || []).map((p) => [p.id, p.title]));
   root.append(
     panel(
-      "Роли",
-      h("button", { class: "btn sm", onclick: () => roleForm(null) }, icon("plus"), "Новая роль"),
+      t("Роли"),
+      h("button", { class: "btn sm", onclick: () => roleForm(null) }, icon("plus"), t("Новая роль")),
       h(
         "div",
         { class: "table-wrap" },
         h(
           "table",
           { class: "table" },
-          h("thead", null, h("tr", null, h("th", null, "Роль"), h("th", null, "Права"), h("th", { class: "right" }, ""))),
+          h("thead", null, h("tr", null, h("th", null, t("Роль")), h("th", null, t("Права")), h("th", { class: "right" }, ""))),
           h(
             "tbody",
             null,
@@ -1971,7 +2042,7 @@ async function pageUsers(root) {
                 null,
                 h("td", { class: "title-cell" }, r.title, h("div", { class: "sub mono" }, r.name)),
                 h("td", { class: "small muted" }, r.permissions.map((p) => permTitle[p] || p).join(" · ") || "—"),
-                h("td", { class: "right nowrap" }, r.name === "admin" ? h("span", { class: "faint small" }, "все права") : h("button", { class: "btn sm ghost", onclick: () => roleForm(r) }, icon("edit")), r.builtin ? null : h("button", { class: "btn sm ghost danger", onclick: () => confirmDialog(`Удалить роль «${r.title}»?`, async () => { await guard(() => api(`/api/roles/${r.id}`, { method: "DELETE" }), "Роль удалена"); renderPage(); }) }, icon("trash")))
+                h("td", { class: "right nowrap" }, r.name === "admin" ? h("span", { class: "faint small" }, t("все права")) : h("button", { class: "btn sm ghost", onclick: () => roleForm(r) }, icon("edit")), r.builtin ? null : h("button", { class: "btn sm ghost danger", onclick: () => confirmDialog(t("Удалить роль «{name}»?", { name: r.title }), async () => { await guard(() => api(`/api/roles/${r.id}`, { method: "DELETE" }), t("Роль удалена")); renderPage(); }) }, icon("trash")))
               )
             )
           )
@@ -1985,11 +2056,11 @@ async function pageUsers(root) {
 function resetPassword(u) {
   const p = input({ type: "password", autocomplete: "new-password" });
   const m = modal({
-    title: "Новый пароль для " + u.username,
-    body: field("Пароль (минимум 6 символов)", p),
+    title: t("Новый пароль для ") + u.username,
+    body: field(t("Пароль (минимум 6 символов)"), p),
     foot: [
-      h("button", { class: "btn", onclick: () => m.close() }, "Отмена"),
-      h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api(`/api/users/${u.id}/password`, { body: { password: p.value } }), "Пароль изменён"); if (r) m.close(); } }, "Сохранить"),
+      h("button", { class: "btn", onclick: () => m.close() }, t("Отмена")),
+      h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api(`/api/users/${u.id}/password`, { body: { password: p.value } }), t("Пароль изменён")); if (r) m.close(); } }, t("Сохранить")),
     ],
   });
 }
@@ -1999,15 +2070,15 @@ function roleForm(role) {
   const body = h(
     "div",
     null,
-    h("div", { class: "grid-2" }, field("Название", input({ value: d.title, oninput: (e) => (d.title = e.target.value) })), field("Код (латиница)", input({ value: d.name, disabled: role && role.builtin, placeholder: "support", oninput: (e) => (d.name = e.target.value) }))),
-    field("Права", h("div", { class: "stack", style: "gap:2px" }, (S.meta.permissions || []).map((p) => checkbox(p.title, d.permissions.includes(p.id), (on) => { d.permissions = on ? [...d.permissions, p.id] : d.permissions.filter((x) => x !== p.id); }))))
+    h("div", { class: "grid-2" }, field(t("Название"), input({ value: d.title, oninput: (e) => (d.title = e.target.value) })), field(t("Код (латиница)"), input({ value: d.name, disabled: role && role.builtin, placeholder: "support", oninput: (e) => (d.name = e.target.value) }))),
+    field(t("Права"), h("div", { class: "stack", style: "gap:2px" }, (S.meta.permissions || []).map((p) => checkbox(p.title, d.permissions.includes(p.id), (on) => { d.permissions = on ? [...d.permissions, p.id] : d.permissions.filter((x) => x !== p.id); }))))
   );
   const m = modal({
-    title: role ? "Роль: " + role.title : "Новая роль",
+    title: role ? t("Роль: ") + role.title : t("Новая роль"),
     body,
     foot: [
-      h("button", { class: "btn", onclick: () => m.close() }, "Отмена"),
-      h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api(role ? `/api/roles/${role.id}` : "/api/roles", { method: role ? "PUT" : "POST", body: d }), "Роль сохранена"); if (r) { m.close(); S.meta = await api("/api/meta"); renderPage(); } } }, "Сохранить"),
+      h("button", { class: "btn", onclick: () => m.close() }, t("Отмена")),
+      h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api(role ? `/api/roles/${role.id}` : "/api/roles", { method: role ? "PUT" : "POST", body: d }), t("Роль сохранена")); if (r) { m.close(); S.meta = await api("/api/meta"); renderPage(); } } }, t("Сохранить")),
     ],
   });
 }
@@ -2017,97 +2088,98 @@ async function pageSettings(root) {
   const v = Object.assign({}, data.values);
   const locked = new Set(v.env_locked || []);
   const txt = (key, label, help, placeholder, type = "text") =>
-    field(label, input({ type, value: v[key] ?? "", placeholder: placeholder || "", disabled: locked.has(key), autocomplete: type === "password" ? "new-password" : "off", oninput: (e) => (v[key] = type === "number" ? Number(e.target.value) : e.target.value) }), locked.has(key) ? "Задано в .env" : help);
+    field(label, input({ type, value: v[key] ?? "", placeholder: placeholder || "", disabled: locked.has(key), autocomplete: type === "password" ? "new-password" : "off", oninput: (e) => (v[key] = type === "number" ? Number(e.target.value) : e.target.value) }), locked.has(key) ? t("Задано в .env") : help);
   const bot = data.bot;
   const botState =
     bot.status === "running"
-      ? h("span", { class: "badge ok" }, "Работает: @" + bot.username)
+      ? h("span", { class: "badge ok" }, t("Работает: @") + bot.username)
       : bot.status === "error"
-      ? h("span", { class: "badge critical" }, "Ошибка: " + bot.error)
-      : h("span", { class: "badge" }, "Не настроен");
+      ? h("span", { class: "badge critical" }, t("Ошибка: ") + bot.error)
+      : h("span", { class: "badge" }, t("Не настроен"));
   const save = async () => {
     const payload = Object.assign({}, v);
     delete payload.env_locked;
     for (const key of Object.keys(payload)) if (key.startsWith("template_")) delete payload[key];
-    const r = await guard(() => api("/api/settings", { method: "PUT", body: payload }), "Настройки сохранены");
+    const r = await guard(() => api("/api/settings", { method: "PUT", body: payload }), t("Настройки сохранены"));
     if (r) {
       S.meta = await api("/api/meta");
       renderPage();
     }
   };
-  append(root, pageHead("Настройки", "Telegram, резервное копирование, хранилища", h("button", { class: "btn primary", onclick: save }, "Сохранить")));
+  append(root, pageHead(t("Настройки"), t("Telegram, резервное копирование, хранилища"), h("button", { class: "btn primary", onclick: save }, t("Сохранить"))));
   root.append(
     panel(
       "Telegram",
-      h("div", { class: "row" }, botState, h("button", { class: "btn sm", onclick: async () => { await guard(() => api("/api/settings/telegram/restart", { body: {} }), "Бот перезапущен"); renderPage(); } }, icon("refresh"), "Перезапустить")),
+      h("div", { class: "row" }, botState, h("button", { class: "btn sm", onclick: async () => { await guard(() => api("/api/settings/telegram/restart", { body: {} }), t("Бот перезапущен")); renderPage(); } }, icon("refresh"), t("Перезапустить"))),
       h(
         "div",
         null,
-        h("div", { class: "grid-2" }, txt("telegram_token", "Токен бота", "Получите у @BotFather", "123456:ABC…", "password"), txt("telegram_api_url", "Локальный Bot API сервер", "Для файлов до 2 ГБ. Пусто — api.telegram.org", "http://127.0.0.1:8081")),
-        h("div", { class: "grid-2" }, txt("public_url", "Внешний адрес OpsWatch", "Для ссылок в уведомлениях и webhook-адресов", data.base_url), field("Лимит части файла, МБ", input({ type: "number", value: v.telegram_part_mb, oninput: (e) => (v.telegram_part_mb = Number(e.target.value)) }), "Не больше 49 для api.telegram.org")),
-        h("div", { class: "row" }, checkbox("Принимать /bug от непривязанных пользователей Telegram", v.bot_public_bugs, (x) => (v.bot_public_bugs = x)))
+        h("div", { class: "grid-2" }, txt("telegram_token", t("Токен бота"), t("Получите у @BotFather"), "123456:ABC…", "password"), txt("telegram_api_url", t("Локальный Bot API сервер"), t("Для файлов до 2 ГБ. Пусто — api.telegram.org"), "http://127.0.0.1:8081")),
+        h("div", { class: "grid-2" }, txt("public_url", t("Внешний адрес OpsWatch"), t("Для ссылок в уведомлениях и webhook-адресов"), data.base_url), field(t("Лимит части файла, МБ"), input({ type: "number", value: v.telegram_part_mb, oninput: (e) => (v.telegram_part_mb = Number(e.target.value)) }), t("Не больше 49 для api.telegram.org"))),
+        h("div", { class: "row" }, checkbox(t("Принимать /bug от непривязанных пользователей Telegram"), v.bot_public_bugs, (x) => (v.bot_public_bugs = x)))
       )
     )
   );
   root.append(
     panel(
-      "Уведомления и доступ",
+      t("Уведомления и доступ"),
       null,
       h(
         "div",
         null,
-        h("div", { class: "grid-2" }, field("Группировать одинаковые события, мин", input({ type: "number", min: 0, value: v.group_window_min, oninput: (e) => (v.group_window_min = Number(e.target.value)) }), "Повторное уведомление не чаще этого интервала"), field("Хранить историю, дней", input({ type: "number", min: 1, value: v.event_retention_days, oninput: (e) => (v.event_retention_days = Number(e.target.value)) }))),
-        checkbox("Разрешить регистрацию новых пользователей", v.registration_enabled, (x) => (v.registration_enabled = x))
+        h("div", { class: "grid-2" }, field(t("Группировать одинаковые события, мин"), input({ type: "number", min: 0, value: v.group_window_min, oninput: (e) => (v.group_window_min = Number(e.target.value)) }), t("Повторное уведомление не чаще этого интервала")), field(t("Хранить историю, дней"), input({ type: "number", min: 1, value: v.event_retention_days, oninput: (e) => (v.event_retention_days = Number(e.target.value)) }))),
+        h("div", { class: "grid-2" }, field(t("Язык системных событий"), select(Object.entries(LANGS), v.language || "ru", { onchange: (e) => (v.language = e.target.value) }), t("На этом языке создаются тексты событий от источников, бэкапов и системы"))),
+        checkbox(t("Разрешить регистрацию новых пользователей"), v.registration_enabled, (x) => (v.registration_enabled = x))
       )
     )
   );
   root.append(
     panel(
-      "Резервное копирование",
+      t("Резервное копирование"),
       null,
       h(
         "div",
         null,
-        h("div", { class: "grid-2" }, txt("backup_dir", "Каталог бэкапов", "Пусто — " + data.backup_dir, data.backup_dir), txt("onec_platform_path", "Каталог платформы 1С", "Для проверки целостности", "C:\\Program Files\\1cv8\\8.3.24.1691\\bin")),
-        h("div", { class: "grid-2" }, txt("mysqldump_path", "Путь к mysqldump", "", "mysqldump"), txt("pg_dump_path", "Путь к pg_dump", "", "pg_dump"))
+        h("div", { class: "grid-2" }, txt("backup_dir", t("Каталог бэкапов"), t("Пусто — ") + data.backup_dir, data.backup_dir), txt("onec_platform_path", t("Каталог платформы 1С"), t("Для проверки целостности"), "C:\\Program Files\\1cv8\\8.3.24.1691\\bin")),
+        h("div", { class: "grid-2" }, txt("mysqldump_path", t("Путь к mysqldump"), "", "mysqldump"), txt("pg_dump_path", t("Путь к pg_dump"), "", "pg_dump"))
       )
     )
   );
   root.append(
     panel(
-      "S3-хранилище для больших бэкапов",
+      t("S3-хранилище для больших бэкапов"),
       null,
       h(
         "div",
         null,
-        h("div", { class: "grid-3" }, txt("s3_endpoint", "Endpoint", "Пусто — AWS", "https://storage.yandexcloud.net"), txt("s3_region", "Регион", "", "ru-central1"), txt("s3_bucket", "Bucket", "")),
-        h("div", { class: "grid-3" }, txt("s3_access_key", "Access key", ""), txt("s3_secret_key", "Secret key", "", "", "password"), txt("s3_prefix", "Префикс", "", "opswatch/")),
-        field("Срок действия ссылки, дней", input({ type: "number", min: 1, max: 7, value: v.s3_link_days, oninput: (e) => (v.s3_link_days = Number(e.target.value)) }))
+        h("div", { class: "grid-3" }, txt("s3_endpoint", "Endpoint", t("Пусто — AWS"), "https://storage.yandexcloud.net"), txt("s3_region", t("Регион"), "", "ru-central1"), txt("s3_bucket", "Bucket", "")),
+        h("div", { class: "grid-3" }, txt("s3_access_key", "Access key", ""), txt("s3_secret_key", "Secret key", "", "", "password"), txt("s3_prefix", t("Префикс"), "", "opswatch/")),
+        field(t("Срок действия ссылки, дней"), input({ type: "number", min: 1, max: 7, value: v.s3_link_days, oninput: (e) => (v.s3_link_days = Number(e.target.value)) }))
       )
     )
   );
   root.append(await templatesPanel());
   root.append(
     panel(
-      "Хранилище",
+      t("Хранилище"),
       null,
       h(
         "div",
         { class: "kv" },
-        h("div", { class: "k" }, "База данных"),
+        h("div", { class: "k" }, t("База данных")),
         h("div", null, h("code", null, data.database)),
-        h("div", { class: "k" }, "Каталог данных"),
+        h("div", { class: "k" }, t("Каталог данных")),
         h("div", null, h("code", null, data.data_dir))
       ),
       false
     )
   );
   if (data.database_dialect === "sqlite") {
-    root.append(h("div", { class: "notice", style: "margin-top:12px" }, icon("database"), h("div", null, "Для большой нагрузки можно перенести данные в PostgreSQL: ", h("code", null, "OpsWatchServer.exe migrate-db postgresql://user:pass@host/opswatch --write-env"), ", затем перезапустить программу.")));
+    root.append(h("div", { class: "notice", style: "margin-top:12px" }, icon("database"), h("div", null, t("Для большой нагрузки можно перенести данные в PostgreSQL: "), h("code", null, "OpsWatchServer.exe migrate-db postgresql://user:pass@host/opswatch --write-env"), t(", затем перезапустить программу."))));
   }
 }
 
-const TEMPLATE_KIND_TITLES = { event: "Новое событие", repeat: "Повтор", escalation: "Эскалация", resolved: "Решено" };
+const TEMPLATE_KIND_TITLES = { event: t("Новое событие"), repeat: t("Повтор"), escalation: t("Эскалация"), resolved: t("Решено") };
 
 function telegramHtml(text) {
   const doc = new DOMParser().parseFromString(`<div>${text}</div>`, "text/html");
@@ -2146,7 +2218,7 @@ function telegramHtml(text) {
 
 async function templatesPanel() {
   const data = await api("/api/settings/templates");
-  const st = { lang: "ru", kind: "event" };
+  const st = { lang: LANG, kind: "event" };
   const langChips = h("div", { class: "chips" });
   const kindChips = h("div", { class: "chips" });
   const textarea = h("textarea", { class: "code", style: "min-height:190px" });
@@ -2179,20 +2251,20 @@ async function templatesPanel() {
   textarea.addEventListener("input", schedule);
   async function refresh() {
     const r = await api("/api/settings/templates/preview", { body: { lang: st.lang, kind: st.kind, value: textarea.value } }).catch((e) => ({ text: "", problems: [e.message] }));
-    const buttons = st.kind === "resolved" ? null : h("div", { class: "tg-buttons" }, ["👌 Принял", "✅ Решено", "ℹ️ Подробнее"].map((b) => h("span", null, b)));
+    const buttons = st.kind === "resolved" ? null : h("div", { class: "tg-buttons" }, [t("👌 Принял"), t("✅ Решено"), t("ℹ️ Подробнее")].map((b) => h("span", null, b)));
     preview.replaceChildren(telegramHtml(r.text), buttons || "");
     problems.replaceChildren(...(r.problems || []).map((p) => h("div", { class: "notice critical", style: "margin:8px 0 0" }, icon("alert"), h("div", null, p))));
   }
   function draw() {
-    langChips.replaceChildren(...data.languages.map((l) => h("button", { class: "chip" + (st.lang === l ? " active" : ""), onclick: () => { st.lang = l; draw(); } }, l === "ru" ? "Русский" : "English")));
+    langChips.replaceChildren(...data.languages.map((l) => h("button", { class: "chip" + (st.lang === l ? " active" : ""), onclick: () => { st.lang = l; draw(); } }, l === "ru" ? t("Русский") : "English")));
     kindChips.replaceChildren(...data.kinds.map((k) => h("button", { class: "chip" + (st.kind === k ? " active" : ""), onclick: () => { st.kind = k; draw(); } }, TEMPLATE_KIND_TITLES[k] || k)));
     const item = data.templates[st.lang][st.kind];
     textarea.value = item.value || item.default;
-    badge.replaceChildren(item.custom ? h("span", { class: "badge accent" }, "Свой шаблон") : h("span", { class: "badge" }, "Стандартный"));
+    badge.replaceChildren(item.custom ? h("span", { class: "badge accent" }, t("Свой шаблон")) : h("span", { class: "badge" }, t("Стандартный")));
     refresh();
   }
   const save = async (value) => {
-    const r = await guard(() => api("/api/settings/templates", { method: "PUT", body: { lang: st.lang, kind: st.kind, value } }), "Шаблон сохранён");
+    const r = await guard(() => api("/api/settings/templates", { method: "PUT", body: { lang: st.lang, kind: st.kind, value } }), t("Шаблон сохранён"));
     if (r) {
       data.templates = r.templates;
       draw();
@@ -2200,25 +2272,25 @@ async function templatesPanel() {
   };
   draw();
   return panel(
-    "Шаблоны уведомлений",
+    t("Шаблоны уведомлений"),
     badge,
     h(
       "div",
       { class: "stack" },
-      h("p", { class: "muted small", style: "margin:0" }, "Текст сообщений в Telegram. Можно использовать теги <b>, <i>, <code>, <a href> и подстановки. Строка, где все подстановки пустые, скрывается."),
+      h("p", { class: "muted small", style: "margin:0" }, t("Текст сообщений в Telegram. Можно использовать теги <b>, <i>, <code>, <a href> и подстановки. Строка, где все подстановки пустые, скрывается.")),
       h("div", { class: "row" }, langChips, h("span", { class: "tab-sep", style: "height:22px" }), kindChips),
       h(
         "div",
         { class: "grid-2", style: "align-items:start" },
         h("div", { class: "stack", style: "gap:8px" }, textarea, placeholders),
-        h("div", null, h("div", { class: "label", style: "margin-bottom:6px" }, "Предпросмотр"), preview, problems)
+        h("div", null, h("div", { class: "label", style: "margin-bottom:6px" }, t("Предпросмотр")), preview, problems)
       ),
       h(
         "div",
         { class: "row" },
-        h("button", { class: "btn primary", onclick: () => save(textarea.value) }, "Сохранить шаблон"),
-        h("button", { class: "btn", onclick: () => save("") }, "Вернуть стандартный"),
-        h("button", { class: "btn", onclick: () => guard(() => api("/api/settings/templates/test", { body: { lang: st.lang, kind: st.kind, value: textarea.value } }), "Тестовое сообщение отправлено") }, icon("send"), "Отправить себе")
+        h("button", { class: "btn primary", onclick: () => save(textarea.value) }, t("Сохранить шаблон")),
+        h("button", { class: "btn", onclick: () => save("") }, t("Вернуть стандартный")),
+        h("button", { class: "btn", onclick: () => guard(() => api("/api/settings/templates/test", { body: { lang: st.lang, kind: st.kind, value: textarea.value } }), t("Тестовое сообщение отправлено")) }, icon("send"), t("Отправить себе"))
       )
     )
   );
@@ -2227,12 +2299,12 @@ async function templatesPanel() {
 async function pageProfile(root) {
   const me = await api("/api/auth/me");
   S.me = me;
-  append(root, pageHead("Профиль", (me.role ? me.role.title : "Роль не назначена") + " · " + me.username));
+  append(root, pageHead(t("Профиль"), (me.role ? me.role.title : t("Роль не назначена")) + " · " + me.username));
   if (me.status !== "active") {
-    root.append(h("div", { class: "notice warning" }, icon("alert"), h("div", null, h("strong", null, "Учётная запись ожидает подтверждения администратором. "), "Пока можно заполнить профиль и привязать Telegram — уведомления начнут приходить после выдачи прав.")));
+    root.append(h("div", { class: "notice warning" }, icon("alert"), h("div", null, h("strong", null, t("Учётная запись ожидает подтверждения администратором. ")), t("Пока можно заполнить профиль и привязать Telegram — уведомления начнут приходить после выдачи прав."))));
   }
   const p = { full_name: me.full_name, email: me.email, telegram_username: me.telegram_username, notify_telegram: me.notify_telegram, notify_desktop: me.notify_desktop, quiet_start: me.quiet_start, quiet_end: me.quiet_end };
-  const saveProfile = async (msg = "Сохранено") => {
+  const saveProfile = async (msg = t("Сохранено")) => {
     const r = await guard(() => api("/api/profile", { method: "PUT", body: p }), msg);
     if (r) {
       S.me = r;
@@ -2246,15 +2318,16 @@ async function pageProfile(root) {
 
   left.append(
     panel(
-      "Учётная запись",
+      t("Учётная запись"),
       null,
       h(
         "div",
         null,
-        field("Имя и фамилия", input({ value: p.full_name, oninput: (e) => (p.full_name = e.target.value) })),
+        field(t("Имя и фамилия"), input({ value: p.full_name, oninput: (e) => (p.full_name = e.target.value) })),
         field("Email", input({ type: "email", value: p.email, oninput: (e) => (p.email = e.target.value) })),
         field("Telegram", input({ value: p.telegram_username, placeholder: "@username", oninput: (e) => (p.telegram_username = e.target.value) })),
-        h("button", { class: "btn primary", onclick: () => saveProfile() }, "Сохранить")
+        field(t("Язык интерфейса и уведомлений"), select(Object.entries(LANGS), LANG, { onchange: (e) => setLanguage(e.target.value) })),
+        h("button", { class: "btn primary", onclick: () => saveProfile() }, t("Сохранить"))
       )
     )
   );
@@ -2264,17 +2337,17 @@ async function pageProfile(root) {
     const linked = user.telegram_linked;
     const items = [];
     if (linked) {
-      items.push(h("div", { class: "notice" }, icon("check"), h("div", null, "Telegram привязан", user.telegram_username ? " (@" + user.telegram_username + ")" : "", ". Уведомления приходят в личные сообщения бота", S.meta.bot_username ? " @" + S.meta.bot_username : "", ".")));
+      items.push(h("div", { class: "notice" }, icon("check"), h("div", null, t("Telegram привязан"), user.telegram_username ? " (@" + user.telegram_username + ")" : "", t(". Уведомления приходят в личные сообщения бота"), S.meta.bot_username ? " @" + S.meta.bot_username : "", ".")));
       items.push(
         h(
           "div",
           { class: "row" },
-          h("button", { class: "btn", onclick: () => guard(() => api("/api/profile/telegram/test", { body: {} }), "Тестовое сообщение отправлено") }, icon("send"), "Тестовое сообщение"),
-          h("button", { class: "btn danger", onclick: async () => { const r = await guard(() => api("/api/profile/telegram", { method: "DELETE" }), "Telegram отвязан"); if (r) drawTelegram(r); } }, "Отвязать")
+          h("button", { class: "btn", onclick: () => guard(() => api("/api/profile/telegram/test", { body: {} }), t("Тестовое сообщение отправлено")) }, icon("send"), t("Тестовое сообщение")),
+          h("button", { class: "btn danger", onclick: async () => { const r = await guard(() => api("/api/profile/telegram", { method: "DELETE" }), t("Telegram отвязан")); if (r) drawTelegram(r); } }, t("Отвязать"))
         )
       );
     } else {
-      items.push(h("p", { class: "muted" }, "Привяжите Telegram, чтобы получать уведомления, нажимать «Принял / Решено» и отправлять баг-репорты боту."));
+      items.push(h("p", { class: "muted" }, t("Привяжите Telegram, чтобы получать уведомления, нажимать «Принял / Решено» и отправлять баг-репорты боту.")));
       const linkArea = h("div");
       items.push(
         h("button", {
@@ -2287,10 +2360,10 @@ async function pageProfile(root) {
                 "div",
                 { class: "stack", style: "margin-top:12px" },
                 r.bot_username
-                  ? h("a", { class: "btn", href: r.deep_link, target: "_blank" }, icon("send"), "Открыть @" + r.bot_username + " и нажать «Старт»")
-                  : h("div", { class: "notice warning" }, icon("alert"), h("div", null, "Системный бот не настроен администратором. Используйте собственного бота ниже.")),
-                h("div", null, h("div", { class: "muted small" }, "или отправьте боту команду:"), h("span", { class: "code-badge" }, "/start " + r.code)),
-                h("div", { class: "faint small" }, "Код действует 15 минут. Страница обновится автоматически после привязки.")
+                  ? h("a", { class: "btn", href: r.deep_link, target: "_blank" }, icon("send"), t("Открыть @") + r.bot_username + t(" и нажать «Старт»"))
+                  : h("div", { class: "notice warning" }, icon("alert"), h("div", null, t("Системный бот не настроен администратором. Используйте собственного бота ниже."))),
+                h("div", null, h("div", { class: "muted small" }, t("или отправьте боту команду:")), h("span", { class: "code-badge" }, "/start " + r.code)),
+                h("div", { class: "faint small" }, t("Код действует 15 минут. Страница обновится автоматически после привязки."))
               )
             );
             let tries = 0;
@@ -2301,12 +2374,12 @@ async function pageProfile(root) {
               if (fresh && fresh.telegram_linked) {
                 clearInterval(timer);
                 S.me = fresh;
-                toast("Telegram привязан");
+                toast(t("Telegram привязан"));
                 drawTelegram(fresh);
               }
             }, 3000);
           },
-        }, icon("link"), "Привязать Telegram"),
+        }, icon("link"), t("Привязать Telegram")),
         linkArea
       );
     }
@@ -2314,7 +2387,7 @@ async function pageProfile(root) {
     const personal = h(
       "details",
       { style: "margin-top:16px", open: !!user.personal_bot },
-      h("summary", { class: "muted", style: "cursor:pointer" }, "Свой бот для уведомлений"),
+      h("summary", { class: "muted", style: "cursor:pointer" }, t("Свой бот для уведомлений")),
       h(
         "div",
         { style: "margin-top:10px" },
@@ -2322,20 +2395,20 @@ async function pageProfile(root) {
           ? h(
               "div",
               { class: "stack" },
-              h("div", null, "Бот ", h("a", { href: "https://t.me/" + user.personal_bot, target: "_blank" }, "@" + user.personal_bot), user.personal_bot_linked ? h("span", { class: "badge ok", style: "margin-left:6px" }, "привязан") : h("span", { class: "badge warning", style: "margin-left:6px" }, "ожидает /start")),
-              user.personal_bot_linked ? null : h("div", { class: "muted small" }, "Откройте бота в Telegram, нажмите «Старт», затем «Проверить»."),
+              h("div", null, t("Бот "), h("a", { href: "https://t.me/" + user.personal_bot, target: "_blank" }, "@" + user.personal_bot), user.personal_bot_linked ? h("span", { class: "badge ok", style: "margin-left:6px" }, t("привязан")) : h("span", { class: "badge warning", style: "margin-left:6px" }, t("ожидает /start"))),
+              user.personal_bot_linked ? null : h("div", { class: "muted small" }, t("Откройте бота в Telegram, нажмите «Старт», затем «Проверить».")),
               h(
                 "div",
                 { class: "row" },
-                user.personal_bot_linked ? null : h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api("/api/profile/personal-bot/detect", { body: {} }), "Бот привязан"); if (r) drawTelegram(r); } }, "Проверить"),
-                h("button", { class: "btn danger", onclick: async () => { const r = await guard(() => api("/api/profile/personal-bot", { method: "DELETE" }), "Бот отключён"); if (r) drawTelegram(r); } }, "Отключить")
+                user.personal_bot_linked ? null : h("button", { class: "btn primary", onclick: async () => { const r = await guard(() => api("/api/profile/personal-bot/detect", { body: {} }), t("Бот привязан")); if (r) drawTelegram(r); } }, t("Проверить")),
+                h("button", { class: "btn danger", onclick: async () => { const r = await guard(() => api("/api/profile/personal-bot", { method: "DELETE" }), t("Бот отключён")); if (r) drawTelegram(r); } }, t("Отключить"))
               )
             )
           : h(
               "div",
               null,
-              field("Токен бота от @BotFather", tokenInput, "Уведомления будут приходить через вашего бота вместо системного"),
-              h("button", { class: "btn", onclick: async () => { const r = await guard(() => api("/api/profile/personal-bot", { method: "PUT", body: { token: tokenInput.value.trim() } })); if (r) { toast("Бот @" + r.username + " сохранён. Откройте его и нажмите «Старт»."); const fresh = await api("/api/auth/me"); drawTelegram(fresh); } } }, "Сохранить бота")
+              field(t("Токен бота от @BotFather"), tokenInput, t("Уведомления будут приходить через вашего бота вместо системного")),
+              h("button", { class: "btn", onclick: async () => { const r = await guard(() => api("/api/profile/personal-bot", { method: "PUT", body: { token: tokenInput.value.trim() } })); if (r) { toast(t("Бот @") + r.username + t(" сохранён. Откройте его и нажмите «Старт».")); const fresh = await api("/api/auth/me"); drawTelegram(fresh); } } }, t("Сохранить бота"))
             )
       )
     );
@@ -2347,21 +2420,21 @@ async function pageProfile(root) {
   const pass = { current: input({ type: "password", autocomplete: "current-password" }), next: input({ type: "password", autocomplete: "new-password" }), again: input({ type: "password", autocomplete: "new-password" }) };
   left.append(
     panel(
-      "Пароль",
+      t("Пароль"),
       null,
       h(
         "div",
         null,
-        field("Текущий пароль", pass.current),
-        h("div", { class: "grid-2", style: "gap:10px" }, field("Новый пароль", pass.next), field("Ещё раз", pass.again)),
+        field(t("Текущий пароль"), pass.current),
+        h("div", { class: "grid-2", style: "gap:10px" }, field(t("Новый пароль"), pass.next), field(t("Ещё раз"), pass.again)),
         h("button", {
           class: "btn",
           onclick: async () => {
-            if (pass.next.value !== pass.again.value) return toast("Пароли не совпадают", "error");
-            const r = await guard(() => api("/api/profile/password", { body: { current: pass.current.value, new: pass.next.value } }), "Пароль изменён");
+            if (pass.next.value !== pass.again.value) return toast(t("Пароли не совпадают"), "error");
+            const r = await guard(() => api("/api/profile/password", { body: { current: pass.current.value, new: pass.next.value } }), t("Пароль изменён"));
             if (r) pass.current.value = pass.next.value = pass.again.value = "";
           },
-        }, "Сменить пароль")
+        }, t("Сменить пароль"))
       )
     )
   );
@@ -2374,28 +2447,28 @@ async function pageProfile(root) {
       p.notify_desktop = e.target.checked;
       if (p.notify_desktop && !inDesktop && "Notification" in window && Notification.permission !== "granted") {
         const perm = await Notification.requestPermission();
-        if (perm !== "granted") toast("Браузер запретил уведомления — разрешите их в настройках сайта", "error");
+        if (perm !== "granted") toast(t("Браузер запретил уведомления — разрешите их в настройках сайта"), "error");
       }
-      await saveProfile(p.notify_desktop ? "Уведомления на ПК включены" : "Уведомления на ПК выключены");
+      await saveProfile(p.notify_desktop ? t("Уведомления на ПК включены") : t("Уведомления на ПК выключены"));
       if (p.notify_desktop && !inDesktop && "Notification" in window && Notification.permission === "granted") {
-        new Notification("OpsWatch", { body: "Уведомления на этом компьютере включены", icon: "/favicon.svg" });
+        new Notification("OpsWatch", { body: t("Уведомления на этом компьютере включены"), icon: "/favicon.svg" });
       }
     },
   });
   right.append(
     panel(
-      "Уведомления",
+      t("Уведомления"),
       null,
       h(
         "div",
         null,
-        h("label", { class: "switch" }, h("div", null, h("div", null, "Telegram"), h("div", { class: "muted small" }, "Личные сообщения от бота")), h("input", { type: "checkbox", checked: p.notify_telegram, onchange: (e) => { p.notify_telegram = e.target.checked; saveProfile(); } })),
-        h("label", { class: "switch" }, h("div", null, h("div", null, inDesktop ? "Уведомления Windows" : "Уведомления на этом компьютере"), h("div", { class: "muted small" }, inDesktop ? "Программа сама покажет всплывающие уведомления, даже свёрнутая в трей" : "Всплывающие уведомления браузера, пока открыта вкладка")), desktopToggle),
+        h("label", { class: "switch" }, h("div", null, h("div", null, "Telegram"), h("div", { class: "muted small" }, t("Личные сообщения от бота"))), h("input", { type: "checkbox", checked: p.notify_telegram, onchange: (e) => { p.notify_telegram = e.target.checked; saveProfile(); } })),
+        h("label", { class: "switch" }, h("div", null, h("div", null, inDesktop ? t("Уведомления Windows") : t("Уведомления на этом компьютере")), h("div", { class: "muted small" }, inDesktop ? t("Программа сама покажет всплывающие уведомления, даже свёрнутая в трей") : t("Всплывающие уведомления браузера, пока открыта вкладка"))), desktopToggle),
         h(
           "div",
           { style: "padding-top:12px" },
-          h("div", { class: "label", style: "margin-bottom:6px" }, "Тихие часы (некритичные приходят без звука)"),
-          h("div", { class: "row" }, input({ type: "time", value: p.quiet_start, style: "width:130px", onchange: (e) => (p.quiet_start = e.target.value) }), "—", input({ type: "time", value: p.quiet_end, style: "width:130px", onchange: (e) => (p.quiet_end = e.target.value) }), h("button", { class: "btn", onclick: () => saveProfile("Тихие часы сохранены") }, "Сохранить"))
+          h("div", { class: "label", style: "margin-bottom:6px" }, t("Тихие часы (некритичные приходят без звука)")),
+          h("div", { class: "row" }, input({ type: "time", value: p.quiet_start, style: "width:130px", onchange: (e) => (p.quiet_start = e.target.value) }), "—", input({ type: "time", value: p.quiet_end, style: "width:130px", onchange: (e) => (p.quiet_end = e.target.value) }), h("button", { class: "btn", onclick: () => saveProfile(t("Тихие часы сохранены")) }, t("Сохранить")))
         )
       )
     )
@@ -2405,22 +2478,22 @@ async function pageProfile(root) {
     const subs = await api("/api/profile/subscriptions");
     const items = subs.items.map((x) => Object.assign({}, x));
     const rows = items.map((it) => {
-      const minSel = select([["info", "все"], ["warning", "от предупреждений"], ["critical", "только критичные"]], it.min_severity, { onchange: (e) => (it.min_severity = e.target.value) });
+      const minSel = select([["info", t("все")], ["warning", t("от предупреждений")], ["critical", t("только критичные")]], it.min_severity, { onchange: (e) => (it.min_severity = e.target.value) });
       const sync = () => minSel.classList.toggle("hidden", it.mode !== "subscribed");
-      const modeSel = select([["rules", "По правилам"], ["subscribed", "Подписаться"], ["muted", "Отключить"]], it.mode, { onchange: (e) => { it.mode = e.target.value; sync(); } });
+      const modeSel = select([["rules", t("По правилам")], ["subscribed", t("Подписаться")], ["muted", t("Отключить")]], it.mode, { onchange: (e) => { it.mode = e.target.value; sync(); } });
       sync();
       return h("div", { class: "between", style: "padding:8px 0;border-bottom:1px solid var(--border)" }, h("div", { class: "row" }, icon(CAT_ICON[it.category]), CAT[it.category]), h("div", { class: "row" }, modeSel, minSel));
     });
     right.append(
       panel(
-        "Подписки на категории",
+        t("Подписки на категории"),
         null,
         h(
           "div",
           null,
-          h("p", { class: "muted small" }, "«По правилам» — как настроил администратор. «Подписаться» — получать все события категории. «Отключить» — не получать (кроме критичных по правилам). Также доступно в боте: /subscribe"),
-          rows.length ? rows : h("div", { class: "muted" }, "Нет доступных категорий"),
-          h("button", { class: "btn primary", style: "margin-top:12px", onclick: () => guard(() => api("/api/profile/subscriptions", { method: "PUT", body: { items } }), "Подписки сохранены") }, "Сохранить подписки")
+          h("p", { class: "muted small" }, t("«По правилам» — как настроил администратор. «Подписаться» — получать все события категории. «Отключить» — не получать (кроме критичных по правилам). Также доступно в боте: /subscribe")),
+          rows.length ? rows : h("div", { class: "muted" }, t("Нет доступных категорий")),
+          h("button", { class: "btn primary", style: "margin-top:12px", onclick: () => guard(() => api("/api/profile/subscriptions", { method: "PUT", body: { items } }), t("Подписки сохранены")) }, t("Сохранить подписки"))
         )
       )
     );
@@ -2429,9 +2502,9 @@ async function pageProfile(root) {
 
 const PAGES = {
   overview: pageOverview,
-  monitoring: categoryPage("monitoring", "Мониторинг", "Zabbix, Prometheus, HTTP-проверки и другие системы"),
-  databases: categoryPage("database", "Базы данных", "MySQL, PostgreSQL, MS SQL: доступность, размер, SQL-проверки"),
-  onec: categoryPage("onec", "1С", "Файловые и серверные базы, журнал регистрации, целостность"),
+  monitoring: categoryPage("monitoring", t("Мониторинг"), t("Zabbix, Prometheus, HTTP-проверки и другие системы")),
+  databases: categoryPage("database", t("Базы данных"), t("MySQL, PostgreSQL, MS SQL: доступность, размер, SQL-проверки")),
+  onec: categoryPage("onec", t("1С"), t("Файловые и серверные базы, журнал регистрации, целостность")),
   backups: pageBackups,
   bugs: pageBugs,
   journal: pageJournal,

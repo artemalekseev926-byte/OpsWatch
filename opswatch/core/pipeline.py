@@ -8,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from opswatch.constants import SEVERITY_ORDER
 from opswatch.core.events import EventIn
-from opswatch.core.router import load_active_users, route_event, select_users
 from opswatch.core.render import truncate
+from opswatch.core.router import load_active_users, route_event, select_users
 from opswatch.db import Database, utcnow
+from opswatch.i18n import ts
 from opswatch.models import Attachment, Event, Notification, Source, User
 from opswatch.permissions import can_view_event
 
@@ -119,7 +120,7 @@ class EventPipeline:
             for event in (await session.execute(query)).scalars().all():
                 event.status = "resolved"
                 event.resolved_at = now
-                event.resolution = data.message or "Источник сообщил о восстановлении"
+                event.resolution = data.message or ts("Источник сообщил о восстановлении")
                 users = await self._previous_recipients(session, event.id)
                 notification_ids += await self._notify(session, event, users, "resolved")
                 resolved.append(event)
@@ -225,9 +226,9 @@ class EventPipeline:
         elif event.message:
             parts.append(event.message)
         if event.source_name:
-            parts.append(f"Источник: {event.source_name}")
+            parts.append(ts("Источник: {source_name}", source_name=event.source_name))
         if kind == "repeat":
-            parts.append(f"Повторов: {event.count}")
+            parts.append(ts("Повторов: {count}", count=event.count))
         body = truncate("\n".join(parts), 1000)
         created = []
         seen: set[int] = set()

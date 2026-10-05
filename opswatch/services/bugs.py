@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from opswatch.core.events import EventIn
+from opswatch.i18n import ts
 from opswatch.models import Event, User
 
 MAX_ATTACHMENT = 20 * 1024 * 1024
@@ -24,11 +25,11 @@ def clean_filename(name: str) -> str:
 
 def save_attachment(folder: Path, filename: str, content: bytes, content_type: str = "") -> dict[str, Any]:
     if len(content) > MAX_ATTACHMENT:
-        raise ValueError("Файл больше 20 МБ")
+        raise ValueError(ts("Файл больше 20 МБ"))
     filename = clean_filename(filename)
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise ValueError(f"Недопустимый тип файла: {suffix or 'без расширения'}")
+        raise ValueError(ts("Недопустимый тип файла: {value}", value=suffix or ts("без расширения")))
     folder.mkdir(parents=True, exist_ok=True)
     stored = f"{secrets.token_hex(12)}{suffix}"
     (folder / stored).write_bytes(content)
@@ -54,8 +55,8 @@ async def create_bug(
     extra: dict[str, Any] | None = None,
 ) -> Event | None:
     text = (text or "").strip()
-    title = (title or "").strip() or (text.splitlines()[0][:120] if text else "Баг-репорт")
-    who = reporter_label or (reporter.full_name or reporter.username if reporter else "аноним")
+    title = (title or "").strip() or (text.splitlines()[0][:120] if text else ts("Баг-репорт"))
+    who = reporter_label or (reporter.full_name or reporter.username if reporter else ts("аноним"))
     details = {"reporter": who, "channel": channel}
     if extra:
         details.update(extra)
@@ -67,7 +68,7 @@ async def create_bug(
             category="bug",
             type=f"bug.{channel}",
             source_id=source_id,
-            source_name=source_name or f"Баг-репорт: {who}",
+            source_name=source_name or ts("Баг-репорт: {who}", who=who),
             details=details,
             fingerprint=secrets.token_hex(16),
             reporter_id=reporter.id if reporter else None,

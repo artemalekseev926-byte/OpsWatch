@@ -18,39 +18,54 @@ import httpx
 
 from opswatch import APP_NAME, __version__
 from opswatch.config import AppConfig
+from opswatch.i18n import system_language, tl
 from opswatch.logs import ensure_streams, setup_logging
 
 log = logging.getLogger("opswatch.desktop")
 
 PREFS_FILE = "desktop.json"
 
-SETUP_HTML = """<!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><title>OpsWatch</title>
+SETUP_TEMPLATE = """<!doctype html>
+<html lang="{lang}"><head><meta charset="utf-8"><title>OpsWatch</title>
 <style>
-:root{--bg:#f5f6f8;--s:#fff;--b:#e2e5ea;--t:#171a1f;--m:#6b7280;--a:#2563eb;color-scheme:light}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--s:#171a20;--b:#2a2f38;--t:#e8eaee;--m:#9aa2ae;--a:#5b8cff;color-scheme:dark}}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--t);
-font:14px/1.5 "Segoe UI",system-ui,sans-serif}.w{width:520px;max-width:calc(100% - 32px)}
-.logo{width:48px;height:48px;border-radius:13px;background:var(--a);display:grid;place-items:center;margin:0 auto 12px}
-h1{text-align:center;margin:0 0 4px;font-size:24px}.sub{text-align:center;color:var(--m);margin-bottom:22px}
-.c{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:18px;margin-bottom:12px}
-.c h2{margin:0 0 4px;font-size:16px}.c p{margin:0 0 12px;color:var(--m)}
-button{height:36px;padding:0 16px;border-radius:8px;border:1px solid var(--a);background:var(--a);color:#fff;font:inherit;font-weight:600;cursor:pointer}
-button.o{background:transparent;color:var(--a)}input{width:100%;height:36px;border:1px solid var(--b);border-radius:8px;padding:0 10px;
-background:var(--s);color:var(--t);font:inherit;margin-bottom:10px}.e{color:#dc2626;min-height:20px;margin-top:6px}
+:root{{--bg:#f5f6f8;--s:#fff;--b:#e2e5ea;--t:#171a1f;--m:#6b7280;--a:#2563eb;color-scheme:light}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#0f1115;--s:#171a20;--b:#2a2f38;--t:#e8eaee;--m:#9aa2ae;--a:#5b8cff;color-scheme:dark}}}}
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--t);
+font:14px/1.5 "Segoe UI",system-ui,sans-serif}}.w{{width:520px;max-width:calc(100% - 32px)}}
+.logo{{width:48px;height:48px;border-radius:13px;background:var(--a);display:grid;place-items:center;margin:0 auto 12px}}
+h1{{text-align:center;margin:0 0 4px;font-size:24px}}.sub{{text-align:center;color:var(--m);margin-bottom:22px}}
+.c{{background:var(--s);border:1px solid var(--b);border-radius:12px;padding:18px;margin-bottom:12px}}
+.c h2{{margin:0 0 4px;font-size:16px}}.c p{{margin:0 0 12px;color:var(--m)}}
+button{{height:36px;padding:0 16px;border-radius:8px;border:1px solid var(--a);background:var(--a);color:#fff;font:inherit;font-weight:600;cursor:pointer}}
+button.o{{background:transparent;color:var(--a)}}input{{width:100%;height:36px;border:1px solid var(--b);border-radius:8px;padding:0 10px;
+background:var(--s);color:var(--t);font:inherit;margin-bottom:10px}}.e{{color:#dc2626;min-height:20px;margin-top:6px}}
 </style></head><body><div class="w">
 <div class="logo"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></div>
-<h1>OpsWatch</h1><div class="sub">Выберите, как запустить программу на этом компьютере</div>
-<div class="c"><h2>Этот компьютер — сервер</h2><p>Здесь будут храниться настройки, источники, бэкапы и пользователи. Другие сотрудники подключаются к этому компьютеру.</p>
-<button onclick="go('server')">Запустить сервер</button></div>
-<div class="c"><h2>Подключиться к серверу</h2><p>OpsWatch уже работает на другом компьютере — укажите его адрес.</p>
-<input id="u" placeholder="http://192.168.1.10:8765"><button class="o" onclick="go('client')">Подключиться</button></div>
+<h1>OpsWatch</h1><div class="sub">{subtitle}</div>
+<div class="c"><h2>{server_title}</h2><p>{server_text}</p>
+<button onclick="go('server')">{server_button}</button></div>
+<div class="c"><h2>{client_title}</h2><p>{client_text}</p>
+<input id="u" placeholder="http://192.168.1.10:8765"><button class="o" onclick="go('client')">{client_button}</button></div>
 <div class="e" id="e"></div></div>
 <script>
-async function go(mode){const e=document.getElementById('e');e.textContent='Подождите…';
-try{const r=await window.pywebview.api.setup_choose(mode,document.getElementById('u').value);if(!r.ok)e.textContent=r.error;}
-catch(x){e.textContent=String(x)}}
+async function go(mode){{const e=document.getElementById('e');e.textContent='{wait}';
+try{{const r=await window.pywebview.api.setup_choose(mode,document.getElementById('u').value);if(!r.ok)e.textContent=r.error;}}
+catch(x){{e.textContent=String(x)}}}}
 </script></body></html>"""
+
+
+def setup_html() -> str:
+    return SETUP_TEMPLATE.format(
+        lang=system_language(),
+        subtitle=tl("Выберите, как запустить программу на этом компьютере"),
+        server_title=tl("Этот компьютер — сервер"),
+        server_text=tl("Здесь будут храниться настройки, источники, бэкапы и пользователи. Другие сотрудники подключаются к этому компьютеру."),
+        server_button=tl("Запустить сервер"),
+        client_title=tl("Подключиться к серверу"),
+        client_text=tl("OpsWatch уже работает на другом компьютере — укажите его адрес."),
+        client_button=tl("Подключиться"),
+        wait=tl("Подождите…"),
+    )
 
 
 def prefs_path(config: AppConfig) -> Path:
@@ -171,7 +186,7 @@ class DesktopAgent:
                 for item in items[:3]:
                     self.notify(item.get("title") or APP_NAME, item.get("body") or "")
                 if len(items) > 3:
-                    self.notify(APP_NAME, f"Ещё уведомлений: {len(items) - 3}")
+                    self.notify(APP_NAME, tl("Ещё уведомлений: {value}", value=len(items) - 3))
             except Exception:
                 log.debug("desktop poll failed", exc_info=True)
             self._wake.wait(self.interval)
@@ -232,7 +247,7 @@ class DesktopApp:
             self.server.start()
         if not wait_healthy(url, 90, self.server):
             error = getattr(self.server, "error", None)
-            raise RuntimeError(f"Сервер не запустился: {error or 'порт ' + str(self.config.port) + ' занят?'}")
+            raise RuntimeError(tl("Сервер не запустился: {value}", value=error or tl("порт {port} занят?", port=self.config.port)))
         return url
 
     def resolve_target(self) -> str:
@@ -254,9 +269,9 @@ class DesktopApp:
             if mode == "client":
                 target = normalize_url(url)
                 if not target:
-                    return {"ok": False, "error": "Укажите адрес сервера"}
+                    return {"ok": False, "error": tl("Укажите адрес сервера")}
                 if not is_healthy(target, 5):
-                    return {"ok": False, "error": f"Сервер OpsWatch не отвечает по адресу {target}"}
+                    return {"ok": False, "error": tl("Сервер OpsWatch не отвечает по адресу {target}", target=target)}
                 self.prefs = {"mode": "client", "server_url": target}
             else:
                 target = self.start_server()
@@ -272,7 +287,7 @@ class DesktopApp:
 
     def show_setup(self) -> None:
         if self.window is not None:
-            self.window.load_html(SETUP_HTML)
+            self.window.load_html(setup_html())
             self.show_window()
 
     def notify(self, title: str, body: str) -> None:
@@ -321,7 +336,7 @@ class DesktopApp:
         threading.Thread(target=self.window.hide, daemon=True).start()
         if not self.hidden_hint_shown:
             self.hidden_hint_shown = True
-            self.notify(APP_NAME, "Программа продолжает работать в трее и покажет уведомления")
+            self.notify(APP_NAME, tl("Программа продолжает работать в трее и покажет уведомления"))
         return False
 
     def start_tray(self) -> None:
@@ -330,20 +345,20 @@ class DesktopApp:
 
             from opswatch.desktop.icon import make_icon
         except Exception:
-            log.info("Трей недоступен", exc_info=True)
+            log.info(tl("Трей недоступен"), exc_info=True)
             return
         menu = pystray.Menu(
-            pystray.MenuItem("Открыть OpsWatch", lambda *_: self.show_window(), default=True),
-            pystray.MenuItem("Открыть в браузере", lambda *_: self.open_browser()),
-            pystray.MenuItem("Сменить сервер", lambda *_: self.show_setup()),
+            pystray.MenuItem(tl("Открыть OpsWatch"), lambda *_: self.show_window(), default=True),
+            pystray.MenuItem(tl("Открыть в браузере"), lambda *_: self.open_browser()),
+            pystray.MenuItem(tl("Сменить сервер"), lambda *_: self.show_setup()),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem("Выход", lambda *_: self.quit()),
+            pystray.MenuItem(tl("Выход"), lambda *_: self.quit()),
         )
         try:
             self.icon = pystray.Icon("OpsWatch", make_icon(64), f"{APP_NAME} {__version__}", menu)
             self.icon.run_detached()
         except Exception:
-            log.info("Не удалось запустить значок в трее", exc_info=True)
+            log.info(tl("Не удалось запустить значок в трее"), exc_info=True)
             self.icon = None
 
     def run(self) -> int:
@@ -360,7 +375,7 @@ class DesktopApp:
             import webview
         except Exception:
             webview = None
-            log.info("pywebview недоступен", exc_info=True)
+            log.info(tl("pywebview недоступен"), exc_info=True)
         try:
             if webview is not None and not self.args.browser:
                 storage = Path(self.config.data_dir) / "webview"
@@ -368,7 +383,7 @@ class DesktopApp:
                 self.window = webview.create_window(
                     APP_NAME,
                     url=self.target or None,
-                    html=None if self.target else SETUP_HTML,
+                    html=None if self.target else setup_html(),
                     js_api=Bridge(self),
                     width=1320,
                     height=860,
@@ -380,7 +395,7 @@ class DesktopApp:
             else:
                 self.run_browser_mode()
         except Exception:
-            log.exception("Окно не открылось, переключаюсь на браузер")
+            log.exception(tl("Окно не открылось, переключаюсь на браузер"))
             self.window = None
             self.run_browser_mode()
         finally:
@@ -490,12 +505,12 @@ def crash_report(exc: BaseException, show: bool) -> None:
         path.write_text(text, encoding="utf-8")
     except OSError:
         path = None
-    log.error("Аварийное завершение:\n%s", text)
+    log.error(tl("Аварийное завершение:\n%s"), text)
     if show and sys.platform == "win32":
         try:
             import ctypes
 
-            message = f"OpsWatch не удалось запустить.\n\n{exc}\n\nПодробности: {path}"
+            message = tl("OpsWatch не удалось запустить.\n\n{exc}\n\nПодробности: {path}", exc=exc, path=path)
             ctypes.windll.user32.MessageBoxW(None, message, "OpsWatch", 0x10)
         except Exception:
             pass
@@ -503,12 +518,12 @@ def crash_report(exc: BaseException, show: bool) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="OpsWatch", description=f"{APP_NAME} {__version__}")
-    parser.add_argument("--server", action="store_true", help="Запустить как сервер на этом компьютере")
-    parser.add_argument("--connect", metavar="URL", help="Подключиться к серверу по адресу")
-    parser.add_argument("--browser", action="store_true", help="Открыть в браузере вместо окна программы")
+    parser.add_argument("--server", action="store_true", help=tl("Запустить как сервер на этом компьютере"))
+    parser.add_argument("--connect", metavar="URL", help=tl("Подключиться к серверу по адресу"))
+    parser.add_argument("--browser", action="store_true", help=tl("Открыть в браузере вместо окна программы"))
     parser.add_argument("--port", type=int)
     parser.add_argument("--data-dir")
-    parser.add_argument("--reset", action="store_true", help="Сбросить выбор режима (сервер/клиент)")
+    parser.add_argument("--reset", action="store_true", help=tl("Сбросить выбор режима (сервер/клиент)"))
     parser.add_argument("--selftest", action="store_true")
     parser.add_argument("--report")
     return parser

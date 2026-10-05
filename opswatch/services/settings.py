@@ -5,6 +5,7 @@ from typing import Any
 from sqlalchemy import select
 
 from opswatch.db import Database
+from opswatch.i18n import normalize_language, set_default_language, system_language
 from opswatch.models import Setting
 from opswatch.security import Crypto
 
@@ -48,6 +49,8 @@ def _coerce(key: str, value: Any) -> Any:
             return int(value)
         except (TypeError, ValueError):
             return DEFAULTS[key]
+    if key == "language":
+        return normalize_language(value) or DEFAULTS[key]
     if key in BOOL_KEYS:
         if isinstance(value, str):
             return value.lower() in {"1", "true", "yes", "on"}
@@ -68,6 +71,7 @@ class SettingsStore:
         async with self.db.session() as session:
             rows = (await session.execute(select(Setting))).scalars().all()
         values = dict(DEFAULTS)
+        values["language"] = system_language()
         for row in rows:
             if row.key not in DEFAULTS:
                 continue
@@ -76,6 +80,7 @@ class SettingsStore:
                 raw = self.crypto.decrypt(raw or "")
             values[row.key] = _coerce(row.key, raw)
         self._cache = values
+        set_default_language(self.get("language"))
 
     def get(self, key: str) -> Any:
         if key in self.env_overrides:
@@ -116,4 +121,6 @@ class SettingsStore:
                 self._cache[key] = value
                 changed.append(key)
             await session.commit()
+        if "language" in changed:
+            set_default_language(self.get("language"))
         return changed
