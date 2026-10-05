@@ -87,7 +87,7 @@ jobs:
           & $exe install
           & $exe start
           $ok = $false
-          for ($i = 0; $i -lt 60; $i++) {
+          for ($i = 0; $i -lt 40; $i++) {
             try {
               $r = Invoke-RestMethod -Uri "http://127.0.0.1:8765/api/health" -TimeoutSec 3
               if ($r.status -eq "ok") { $ok = $true; break }
@@ -103,6 +103,9 @@ jobs:
           Start-Sleep -Seconds 5
           & $exe remove
           if (-not $ok) {
+            sc.exe query OpsWatch
+            Get-WinEvent -LogName Application -MaxEvents 30 -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -match "OpsWatch|Service Control|Python|Application Error" } | Format-List TimeCreated, ProviderName, Message
+            Get-WinEvent -LogName System -MaxEvents 30 -ErrorAction SilentlyContinue | Where-Object { $_.ProviderName -match "Service Control" } | Format-List TimeCreated, Message
             Get-Content "dist\OpsWatch\data\logs\opswatch.log" -ErrorAction SilentlyContinue
             throw "service did not start"
           }
